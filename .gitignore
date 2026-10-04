@@ -1,0 +1,33 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Environment variables and credentials
+.env
+.env.*
+!.env.example
+
+# Databases and Local storage
+*.sqlite
+*.sqlite3
+*.db
+
+# Build outputs and cache directories
+dist/
+build/
+.expo/
+.next/
+out/
+coverage/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# IDE and OS files
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+*.swo

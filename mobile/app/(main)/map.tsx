@@ -1,0 +1,126 @@
+import React, { useState } from 'react';
+import { View, StyleSheet, TouchableOpacity, Text } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useRouter } from 'expo-router';
+import { FieldMapView } from '../../src/components/MapView';
+import { StatusBadge } from '../../src/components/StatusBadge';
+import { DeviceBottomSheet } from '../../src/components/DeviceBottomSheet';
+import { BluetoothConnectModal } from '../../src/components/BluetoothConnectModal';
+import { useDeviceStore, DeviceMarker } from '../../src/store/deviceStore';
+import { useNetworkStore } from '../../src/store/networkStore';
+import { Colors, Spacing } from '../../src/utils/responsive';
+import { useLanguageStore } from '../../src/i18n';
+import { ErrorBoundary } from '../../src/components/ErrorBoundary';
+
+export default function MapScreen() {
+  const insets = useSafeAreaInsets();
+  const router = useRouter();
+  const t = useLanguageStore((s) => s.t);
+
+  const devices = useDeviceStore((s) => s.devices);
+  const { isOnline, isLoraConnected, toggleNetwork } = useNetworkStore();
+  const [selectedDevice, setSelectedDevice] = useState<DeviceMarker | null>(null);
+  const [showBtModal, setShowBtModal] = useState(false);
+
+  return (
+    <ErrorBoundary fallbackTitle="Map View Error">
+      <View style={[styles.container, { paddingTop: insets.top }]}>
+      {/* Field Operations Header Overlay */}
+      <View style={styles.topHeader}>
+        <TouchableOpacity activeOpacity={0.8} onPress={() => setShowBtModal(true)}>
+          <StatusBadge isOnline={isOnline} isLoraConnected={isLoraConnected} />
+        </TouchableOpacity>
+
+        <View style={styles.headerBtnGroup}>
+          <TouchableOpacity style={styles.btBtn} onPress={() => setShowBtModal(true)}>
+            <Text style={styles.btBtnText}>🔌 Bluetooth</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity style={styles.netToggleBtn} onPress={toggleNetwork}>
+            <Text style={styles.netToggleText}>
+              {isOnline ? t('simulate_offline') : t('go_online')}
+            </Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+
+      {/* Main Field Map */}
+      <FieldMapView
+        devices={devices}
+        onSelectDevice={(dev) => setSelectedDevice(dev)}
+        isOfflineMapActive={!isOnline}
+      />
+
+      {/* Selected Device Details Bottom Sheet */}
+      <DeviceBottomSheet
+        device={selectedDevice}
+        onClose={() => setSelectedDevice(null)}
+        onOpenChat={(userName) => {
+          setSelectedDevice(null);
+          router.push('/chat');
+        }}
+        onCenterMap={(lat, lon) => {
+          console.log(`Centered map on ${lat}, ${lon}`);
+        }}
+      />
+
+      {/* Interactive Bluetooth Gateway Scanner Modal */}
+      <BluetoothConnectModal
+        visible={showBtModal}
+        onClose={() => setShowBtModal(false)}
+      />
+    </View>
+    </ErrorBoundary>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: Colors.background
+  },
+  topHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.sm,
+    backgroundColor: Colors.card,
+    borderBottomWidth: 1,
+    borderColor: Colors.cardBorder,
+    zIndex: 20
+  },
+  headerBtnGroup: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.xs + 2
+  },
+  btBtn: {
+    backgroundColor: '#F4F5F7',
+    paddingHorizontal: Spacing.sm + 4,
+    paddingVertical: Spacing.xs + 4,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: Colors.cardBorder
+  },
+  btBtnText: {
+    color: Colors.textPrimary,
+    fontSize: 12,
+    fontWeight: 'bold',
+    fontFamily: 'OpenSans_700Bold'
+  },
+  netToggleBtn: {
+    backgroundColor: '#18181B',
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.xs + 4,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: '#27272A'
+  },
+  netToggleText: {
+    color: '#FFFFFF',
+    fontSize: 12,
+    fontWeight: 'bold',
+    fontFamily: 'OpenSans_700Bold'
+  }
+});
