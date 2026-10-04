@@ -36,7 +36,8 @@
         "BLUETOOTH_SCAN",
         "INTERNET",
         "WRITE_EXTERNAL_STORAGE"
-      ]
+      ],
+      "package": "com.sivaguru17.lorateamtracker"
     },
     "web": {
       "favicon": "./assets/favicon.png"
@@ -44,6 +45,14 @@
     "plugins": [
       "expo-router"
     ],
-    "scheme": "loratracker"
+    "scheme": "loratracker",
+    "extra": {
+      "router": {
+        "origin": false
+      },
+      "eas": {
+        "projectId": "521ec25c-1b10-45ad-a6d4-6a3059fefb8d"
+      }
+    }
   }
 }
