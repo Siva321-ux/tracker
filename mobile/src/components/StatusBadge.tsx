@@ -34,17 +34,23 @@ const styles = StyleSheet.create({
   container: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: Spacing.sm
+    flexWrap: 'wrap',
+    gap: 6
   },
   badge: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: Spacing.sm + 4,
-    paddingVertical: Spacing.xs + 2,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
     borderRadius: 20,
     borderWidth: 1,
     borderColor: Colors.cardBorder,
-    backgroundColor: Colors.card
+    backgroundColor: Colors.card,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.04,
+    shadowRadius: 2,
+    elevation: 2
   },
   onlineBadge: {
     backgroundColor: '#FFFFFF',

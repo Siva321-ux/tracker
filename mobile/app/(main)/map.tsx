@@ -83,22 +83,30 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
+    flexWrap: 'wrap',
     paddingHorizontal: Spacing.md,
-    paddingVertical: Spacing.sm,
+    paddingVertical: Spacing.xs + 4,
     backgroundColor: Colors.card,
     borderBottomWidth: 1,
     borderColor: Colors.cardBorder,
-    zIndex: 20
+    gap: Spacing.sm,
+    zIndex: 20,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.04,
+    shadowRadius: 3,
+    elevation: 3
   },
   headerBtnGroup: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: Spacing.xs + 2
+    flexWrap: 'wrap',
+    gap: Spacing.xs + 4
   },
   btBtn: {
     backgroundColor: '#F4F5F7',
     paddingHorizontal: Spacing.sm + 4,
-    paddingVertical: Spacing.xs + 4,
+    paddingVertical: Spacing.xs + 3,
     borderRadius: 20,
     borderWidth: 1,
     borderColor: Colors.cardBorder
@@ -112,7 +120,7 @@ const styles = StyleSheet.create({
   netToggleBtn: {
     backgroundColor: '#18181B',
     paddingHorizontal: Spacing.md,
-    paddingVertical: Spacing.xs + 4,
+    paddingVertical: Spacing.xs + 3,
     borderRadius: 20,
     borderWidth: 1,
     borderColor: '#27272A'
