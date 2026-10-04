@@ -4,6 +4,15 @@ import { DeviceMarker } from '../store/deviceStore';
 import { Colors, Spacing } from '../utils/responsive';
 import { t } from '../i18n';
 
+let WebViewComp: any = null;
+if (Platform.OS !== 'web') {
+  try {
+    WebViewComp = require('react-native-webview').WebView;
+  } catch (e) {
+    console.warn('[MapView] WebView not loaded');
+  }
+}
+
 interface MapViewProps {
   devices: Record<string, DeviceMarker>;
   onSelectDevice: (device: DeviceMarker) => void;
@@ -87,8 +96,6 @@ export const FieldMapView: React.FC<MapViewProps> = ({
             map.invalidateSize();
           }, 300);
 
-
-
           var markersData = ${markersJson};
           markersData.forEach(function(m) {
             var iconHtml = '<div class="custom-marker">◈ ' + m.name + ' <br/><span class="marker-batt">⚡ ' + m.battery + '%</span></div>';
@@ -100,7 +107,12 @@ export const FieldMapView: React.FC<MapViewProps> = ({
             });
             var marker = L.marker([m.lat, m.lon], { icon: customIcon }).addTo(map);
             marker.on('click', function() {
-              window.parent.postMessage(JSON.stringify({ type: 'SELECT_DEVICE', deviceId: m.id }), '*');
+              var msg = JSON.stringify({ type: 'SELECT_DEVICE', deviceId: m.id });
+              if (window.ReactNativeWebView) {
+                window.ReactNativeWebView.postMessage(msg);
+              } else if (window.parent) {
+                window.parent.postMessage(msg, '*');
+              }
             });
           });
         </script>
@@ -132,6 +144,22 @@ export const FieldMapView: React.FC<MapViewProps> = ({
           srcDoc={generateMapHtml()}
           style={styles.webMapIframe as any}
           title="Field Map"
+        />
+      ) : WebViewComp ? (
+        <WebViewComp
+          originWhitelist={['*']}
+          source={{ html: generateMapHtml() }}
+          style={styles.webMapIframe}
+          javaScriptEnabled={true}
+          domStorageEnabled={true}
+          onMessage={(event: any) => {
+            try {
+              const data = JSON.parse(event.nativeEvent.data);
+              if (data && data.type === 'SELECT_DEVICE' && devices[data.deviceId]) {
+                onSelectDevice(devices[data.deviceId]);
+              }
+            } catch (e) {}
+          }}
         />
       ) : (
         <View style={styles.terrainMap}>
