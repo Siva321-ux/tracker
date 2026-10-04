@@ -4,7 +4,7 @@ import { useNetworkStore } from '../../store/networkStore';
 export class SyncManager {
   private static instance: SyncManager;
   private isSyncing: boolean = false;
-  private serverUrl: string = 'http://localhost:5000/api';
+  private serverUrl: string = 'https://tracker-91ku.onrender.com/api';
 
   private constructor() {}
 

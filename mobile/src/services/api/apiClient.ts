@@ -1,6 +1,6 @@
 import { Platform } from 'react-native';
 
-const DEFAULT_API_HOST = Platform.OS === 'android' ? 'http://10.0.2.2:5000' : 'http://localhost:5000';
+const DEFAULT_API_HOST = 'https://tracker-91ku.onrender.com';
 
 export class ApiClient {
   private static instance: ApiClient;
