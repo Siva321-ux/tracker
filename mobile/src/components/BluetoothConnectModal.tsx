@@ -40,6 +40,7 @@ export const BluetoothConnectModal: React.FC<BluetoothConnectModalProps> = ({ vi
 
   const handleScan = async () => {
     setIsScanning(true);
+    setDevices([]);
     try {
       const list = await btService.scanDevices();
       setDevices(list);

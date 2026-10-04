@@ -24,12 +24,44 @@ export class BluetoothService {
     return BluetoothService.instance;
   }
 
+  public async requestPermissions(): Promise<boolean> {
+    try {
+      const RN = require('react-native');
+      if (!RN || RN.Platform?.OS !== 'android') return true;
+      const { Platform, PermissionsAndroid } = RN;
+
+      if (typeof Platform.Version === 'number' && Platform.Version >= 31) {
+        const granted = await PermissionsAndroid.requestMultiple([
+          PermissionsAndroid.PERMISSIONS.BLUETOOTH_SCAN,
+          PermissionsAndroid.PERMISSIONS.BLUETOOTH_CONNECT,
+          PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION,
+        ]);
+        return (
+          granted[PermissionsAndroid.PERMISSIONS.BLUETOOTH_SCAN] === PermissionsAndroid.RESULTS.GRANTED &&
+          granted[PermissionsAndroid.PERMISSIONS.BLUETOOTH_CONNECT] === PermissionsAndroid.RESULTS.GRANTED
+        );
+      } else if (PermissionsAndroid) {
+        const granted = await PermissionsAndroid.request(
+          PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION
+        );
+        return granted === PermissionsAndroid.RESULTS.GRANTED;
+      }
+      return true;
+    } catch (e) {
+      return true;
+    }
+  }
+
   public async scanDevices(): Promise<BluetoothDevice[]> {
-    // Isolated abstraction layer for hardware scanning
+    await this.requestPermissions();
+    // Simulate active hardware RF scanning delay
+    await new Promise((res) => setTimeout(res, 1200));
+
     return [
       { id: 'lora-gw-01', name: 'ESP32 LoRa Gateway 01', rssi: -65 },
       { id: 'lora-gw-02', name: 'Heltec V3 Gateway', rssi: -78 },
-      { id: 'lora-node-dev1', name: 'TTGO T-Beam dev1', rssi: -82 }
+      { id: 'lora-node-dev1', name: 'TTGO T-Beam dev1', rssi: -82 },
+      { id: 'lora-gw-sathy', name: 'Sathy Mesh Node 04', rssi: -71 }
     ];
   }
 
