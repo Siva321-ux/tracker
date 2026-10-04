@@ -87,19 +87,7 @@ export const FieldMapView: React.FC<MapViewProps> = ({
             map.invalidateSize();
           }, 300);
 
-          var sathyBounds = [
-            [11.4500, 77.1800],
-            [11.4500, 77.3000],
-            [11.5500, 77.3000],
-            [11.5500, 77.1800]
-          ];
-          var polygon = L.polygon(sathyBounds, {
-            color: '#22C55E',
-            weight: 2,
-            dashArray: '6, 6',
-            fillColor: '#22C55E',
-            fillOpacity: 0.08
-          }).addTo(map);
+
 
           var markersData = ${markersJson};
           markersData.forEach(function(m) {
