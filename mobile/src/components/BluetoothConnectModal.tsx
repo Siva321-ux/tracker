@@ -125,6 +125,14 @@ export const BluetoothConnectModal: React.FC<BluetoothConnectModalProps> = ({ vi
               data={devices}
               keyExtractor={(item) => item.id}
               contentContainerStyle={styles.deviceList}
+              ListEmptyComponent={
+                <View style={styles.emptyBox}>
+                  <Text style={styles.emptyTitle}>📡 No Bluetooth Devices Found</Text>
+                  <Text style={styles.emptySubText}>
+                    Ensure your ESP32 or Heltec LoRa gateway is powered ON and Bluetooth is active.
+                  </Text>
+                </View>
+              }
               renderItem={({ item }) => {
                 const isCurrent = connectedDeviceId === item.id;
                 const isConnectingThis = connectingId === item.id;
@@ -341,5 +349,29 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: 'bold',
     fontFamily: 'OpenSans_700Bold'
+  },
+  emptyBox: {
+    padding: Spacing.xl,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#F4F5F7',
+    borderRadius: 16,
+    borderWidth: 1,
+    borderStyle: 'dashed',
+    borderColor: Colors.cardBorder,
+    marginTop: Spacing.xs
+  },
+  emptyTitle: {
+    color: Colors.textPrimary,
+    fontSize: 14,
+    fontWeight: 'bold',
+    fontFamily: 'OpenSans_700Bold',
+    marginBottom: 4
+  },
+  emptySubText: {
+    color: Colors.textMuted,
+    fontSize: 12,
+    textAlign: 'center',
+    fontFamily: 'OpenSans_400Regular'
   }
 });

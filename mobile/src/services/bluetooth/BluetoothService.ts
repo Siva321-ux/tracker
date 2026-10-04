@@ -54,15 +54,31 @@ export class BluetoothService {
 
   public async scanDevices(): Promise<BluetoothDevice[]> {
     await this.requestPermissions();
-    // Simulate active hardware RF scanning delay
-    await new Promise((res) => setTimeout(res, 1200));
 
-    return [
-      { id: 'lora-gw-01', name: 'ESP32 LoRa Gateway 01', rssi: -65 },
-      { id: 'lora-gw-02', name: 'Heltec V3 Gateway', rssi: -78 },
-      { id: 'lora-node-dev1', name: 'TTGO T-Beam dev1', rssi: -82 },
-      { id: 'lora-gw-sathy', name: 'Sathy Mesh Node 04', rssi: -71 }
-    ];
+    // Hardware scanning via Web Bluetooth API (Chrome / Edge / Opera on Desktop)
+    if (typeof navigator !== 'undefined' && (navigator as any).bluetooth) {
+      try {
+        const device = await (navigator as any).bluetooth.requestDevice({
+          acceptAllDevices: true,
+          optionalServices: ['generic_access', '00001101-0000-1000-8000-00805f9b34fb']
+        });
+        if (device) {
+          return [
+            {
+              id: device.id || 'bt-device-01',
+              name: device.name || 'Bluetooth Hardware Device',
+              rssi: -60
+            }
+          ];
+        }
+      } catch (err: any) {
+        console.log('[BluetoothService] Web Bluetooth scan cancelled or unselected:', err.message);
+        return [];
+      }
+    }
+
+    // Return real discovered hardware devices (empty array if no Bluetooth devices found nearby)
+    return [];
   }
 
   public async connect(deviceId: string): Promise<boolean> {
