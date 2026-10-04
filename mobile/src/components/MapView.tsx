@@ -39,10 +39,10 @@ export const FieldMapView: React.FC<MapViewProps> = ({
 
     const tileUrl =
       mapMode === 'satellite'
-        ? `https://mt1.google.com/vt/lyrs=s&x={x}&y={y}&z={z}&key=${googleApiKey}`
+        ? 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'
         : mapMode === 'terrain'
         ? 'https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png'
-        : `https://mt1.google.com/vt/lyrs=m&x={x}&y={y}&z={z}&key=${googleApiKey}`;
+        : 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png';
 
     return `
       <!DOCTYPE html>
@@ -53,7 +53,7 @@ export const FieldMapView: React.FC<MapViewProps> = ({
         <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
         <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
         <style>
-          html, body, #map { height: 100%; width: 100%; margin: 0; padding: 0; background: #121214; }
+          html, body, #map { height: 100vh; width: 100vw; margin: 0; padding: 0; background: #121214; }
           .custom-marker {
             background: #18181B;
             border: 2px solid #22C55E;
@@ -77,12 +77,15 @@ export const FieldMapView: React.FC<MapViewProps> = ({
       <body>
         <div id="map"></div>
         <script>
-          var map = L.map('map', { zoomControl: false }).setView([${center.lat}, ${center.lon}], ${zoomLevel});
+          var map = L.map('map', { zoomControl: true }).setView([${center.lat}, ${center.lon}], ${zoomLevel});
           
           L.tileLayer('${tileUrl}', {
-            maxZoom: 19,
-            subdomains: 'abcd'
+            maxZoom: 19
           }).addTo(map);
+
+          setTimeout(function() {
+            map.invalidateSize();
+          }, 300);
 
           var sathyBounds = [
             [11.4500, 77.1800],
@@ -176,7 +179,7 @@ export const FieldMapView: React.FC<MapViewProps> = ({
           style={[styles.modeBtn, mapMode === 'google' && styles.modeBtnActive]}
           onPress={() => setMapMode('google')}
         >
-          <Text style={[styles.modeBtnText, mapMode === 'google' && styles.modeBtnTextActive]}>Google Maps</Text>
+          <Text style={[styles.modeBtnText, mapMode === 'google' && styles.modeBtnTextActive]}>Roadmap</Text>
         </TouchableOpacity>
 
         <TouchableOpacity
@@ -200,12 +203,15 @@ export const FieldMapView: React.FC<MapViewProps> = ({
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+    height: '100%',
+    minHeight: 500,
     backgroundColor: '#121214',
     position: 'relative'
   },
   webMapIframe: {
     width: '100%',
     height: '100%',
+    flex: 1,
     borderWidth: 0
   },
   terrainMap: {
