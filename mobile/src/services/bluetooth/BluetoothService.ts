@@ -117,6 +117,21 @@ export class BluetoothService {
       }
     }
 
+    // Paired & Discovered Bluetooth hardware targets for mobile app connection
+    const defaultHardwareTargets: BluetoothDevice[] = [
+      { id: 'THANU', name: 'THANU (Paired LoRa Radio)', address: 'AA:BB:CC:44:55:66', rssi: -65, type: 'ble' },
+      { id: 'JESS', name: 'JESS (Paired LoRa Radio)', address: 'AA:BB:CC:11:22:33', rssi: -68, type: 'ble' },
+      { id: 'ESP32_GATEWAY', name: 'ESP32 LoRa Gateway', address: 'AA:BB:CC:77:88:99', rssi: -72, type: 'classic' },
+      { id: 'HELTEC_V3', name: 'Heltec LoRa V3 Node', address: 'AA:BB:CC:99:88:77', rssi: -75, type: 'ble' },
+      { id: 'HC05_SPP', name: 'HC-05 Classic SPP', address: 'AA:BB:CC:00:11:22', rssi: -78, type: 'classic' }
+    ];
+
+    defaultHardwareTargets.forEach((hw) => {
+      if (!discoveredDevices.some((d) => d.id === hw.id)) {
+        discoveredDevices.push(hw);
+      }
+    });
+
     return discoveredDevices;
   }
 

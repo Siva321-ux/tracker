@@ -38,6 +38,7 @@ export const BluetoothConnectModal: React.FC<BluetoothConnectModalProps> = ({ vi
   // Custom Call Sign / Name confirmation state
   const [pendingDev, setPendingDev] = useState<BluetoothDevice | null>(null);
   const [customNodeName, setCustomNodeName] = useState<string>('');
+  const [customPairedName, setCustomPairedName] = useState<string>('');
 
   const btService = BluetoothService.getInstance();
 
@@ -223,6 +224,42 @@ export const BluetoothConnectModal: React.FC<BluetoothConnectModalProps> = ({ vi
               </View>
             </View>
           )}
+
+          {/* Direct Paired Device Connection Card */}
+          <View style={[styles.callSignCard, { backgroundColor: '#F4F5F7', borderColor: '#E4E4E7', marginBottom: Spacing.sm }]}>
+            <Text style={[styles.callSignTitle, { color: Colors.textPrimary }]}>📱 Connect Paired Phone Bluetooth Device</Text>
+            <Text style={styles.callSignSub}>
+              Select or type your paired Bluetooth name (e.g. THANU, JESS, ESP32 Gateway, HC-05)
+            </Text>
+            <View style={styles.callSignInputRow}>
+              <TextInput
+                style={[styles.callSignInput, { backgroundColor: '#FFFFFF' }]}
+                value={customPairedName}
+                onChangeText={setCustomPairedName}
+                placeholder="Enter Paired Device Name (e.g. THANU or JESS)"
+                placeholderTextColor={Colors.textMuted}
+              />
+              <TouchableOpacity
+                style={[styles.saveCallSignBtn, { backgroundColor: '#18181B' }]}
+                onPress={() => {
+                  const target = customPairedName.trim();
+                  if (!target) {
+                    Alert.alert('Device Name Required', 'Please enter your paired Bluetooth device name (e.g. THANU or JESS).');
+                    return;
+                  }
+                  handleConnect({
+                    id: target,
+                    name: `${target} (Paired Radio)`,
+                    address: target,
+                    rssi: -65,
+                    type: 'ble'
+                  });
+                }}
+              >
+                <Text style={styles.saveCallSignText}>Connect & Pair ➔</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
 
           {/* Scan Action Row */}
           <View style={styles.scanRow}>
