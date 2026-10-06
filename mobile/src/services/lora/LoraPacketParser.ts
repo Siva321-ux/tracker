@@ -145,12 +145,30 @@ export class LoraPacketParser {
     };
   }
 
+  private static safeBase64Decode(str: string): string {
+    if (!str) return str;
+    const trimmed = str.trim();
+    try {
+      const base64Regex = /^[A-Za-z0-9+/=]+$/;
+      if (base64Regex.test(trimmed) && trimmed.length % 4 === 0) {
+        const decoded = typeof Buffer !== 'undefined'
+          ? Buffer.from(trimmed, 'base64').toString('utf-8')
+          : atob(trimmed);
+        if (decoded && /^[\x20-\x7E\s\r\n\t]+$/.test(decoded)) {
+          return decoded;
+        }
+      }
+    } catch (_) {}
+    return trimmed;
+  }
+
   private static parseMsgCommonPacket(parts: string[], raw: string): ParsedPublicPacket | null {
     // Format: MSG,COMMON,SENDER_ID,ALL,MESSAGE
     if (parts.length < 5) return null;
     const senderId = parts[2].trim();
     const teamId = parts[3].trim();
-    const message = parts.slice(4).join(',').trim();
+    const rawMessage = parts.slice(4).join(',').trim();
+    const message = LoraPacketParser.safeBase64Decode(rawMessage);
 
     if (!senderId || !message) return null;
 
@@ -168,7 +186,8 @@ export class LoraPacketParser {
     if (parts.length < 5) return null;
     const senderId = parts[2].trim();
     const receiverId = parts[3].trim();
-    const message = parts.slice(4).join(',').trim();
+    const rawMessage = parts.slice(4).join(',').trim();
+    const message = LoraPacketParser.safeBase64Decode(rawMessage);
 
     if (!senderId || !receiverId || !message) return null;
 

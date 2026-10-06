@@ -210,11 +210,21 @@ export default function ChatScreen() {
         synced: isOnline
       };
 
+      const encodeBase64 = (str: string): string => {
+        try {
+          return typeof Buffer !== 'undefined'
+            ? Buffer.from(str, 'utf-8').toString('base64')
+            : btoa(unescape(encodeURIComponent(str)));
+        } catch (_) {
+          return str;
+        }
+      };
+
       if (chatTab === 'public') {
         // 1. Instant UI update
         setPublicMessages((prev) => [...prev, newMsg]);
-        // 2. Instant Bluetooth Radio Packet Dispatch (Zero-latency)
-        const rawPublicPacket = `MSG,COMMON,${selfName},ALL,${newMsg.message}`;
+        // 2. Instant Bluetooth Radio Packet Dispatch (Base64 encoded for Web & LoRa mesh compatibility)
+        const rawPublicPacket = `MSG,COMMON,${selfName},ALL,${encodeBase64(newMsg.message)}`;
         BluetoothService.getInstance().sendData(rawPublicPacket);
         // 3. Background SQLite Storage
         savePublicMessageLocally(1, currentUser?.id || 1, selfName, newMsg.message, clientMsgId, isOnline).catch(console.warn);
@@ -243,8 +253,8 @@ export default function ChatScreen() {
           return nextState;
         });
 
-        // 2. Instant Bluetooth Radio Packet Dispatch (Zero-latency)
-        const rawChatPacket = `MSG,PRIVATE,${selfName},${targetRecipient},${newMsg.message}`;
+        // 2. Instant Bluetooth Radio Packet Dispatch (Base64 encoded for Web & LoRa mesh compatibility)
+        const rawChatPacket = `MSG,PRIVATE,${selfName},${targetRecipient},${encodeBase64(newMsg.message)}`;
         BluetoothService.getInstance().sendData(rawChatPacket);
 
         // 3. Background SQLite Storage

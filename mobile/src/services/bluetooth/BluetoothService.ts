@@ -78,15 +78,12 @@ export class BluetoothService {
   private bleManager: any = null;
 
   private getBleManager(): any {
-    if (!this.bleManager && Platform.OS !== 'web') {
+    if (!this.bleManager && (Platform.OS === 'android' || Platform.OS === 'ios')) {
       try {
-        const RN = require('react-native');
-        if (RN && RN.NativeModules && RN.NativeModules.BleManager) {
-          const { BleManager } = require('react-native-ble-plx');
-          this.bleManager = new BleManager();
-        }
-      } catch (e) {
-        // react-native-ble-plx is not supported on non-native environments (Node/Web)
+        const { BleManager } = require('react-native-ble-plx');
+        this.bleManager = new BleManager();
+      } catch (e: any) {
+        console.warn('[BluetoothService] BleManager init notice:', e?.message);
       }
     }
     return this.bleManager;
@@ -116,7 +113,7 @@ export class BluetoothService {
         console.log('[BluetoothService] Starting native mobile Bluetooth hardware scan...');
         await new Promise<void>((resolve) => {
           const timeoutId = setTimeout(() => {
-            try { manager.stopDeviceScan(); } catch (_) {}
+            try { manager.stopDeviceScan(); } catch (_) { }
             resolve();
           }, 4000);
 
@@ -127,7 +124,7 @@ export class BluetoothService {
               if (error) {
                 console.warn('[BluetoothService] Native BLE Scan error:', error?.message);
                 clearTimeout(timeoutId);
-                try { manager.stopDeviceScan(); } catch (_) {}
+                try { manager.stopDeviceScan(); } catch (_) { }
                 resolve();
                 return;
               }
@@ -220,7 +217,7 @@ export class BluetoothService {
     try {
       // 1. Connect native mobile BLE device via react-native-ble-plx if available
       const manager = this.getBleManager();
-      if (manager && deviceId && typeof window === 'undefined') {
+      if (manager && deviceId) {
         try {
           console.log(`[BluetoothService] Connecting native mobile BLE hardware device ${deviceId}...`);
           const device = await manager.connectToDevice(deviceId, { autoConnect: true });
@@ -330,7 +327,7 @@ export class BluetoothService {
       if (this.nativeDevice && this.nativeDevice.cancelConnection) {
         try {
           this.nativeDevice.cancelConnection();
-        } catch (e) {}
+        } catch (e) { }
       }
       if (this.webGattServer && this.webGattServer.disconnect) {
         try {
