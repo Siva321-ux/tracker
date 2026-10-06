@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { View, StyleSheet, TouchableOpacity, Text } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -8,6 +8,7 @@ import { DeviceBottomSheet } from '../../src/components/DeviceBottomSheet';
 import { BluetoothConnectModal } from '../../src/components/BluetoothConnectModal';
 import { useDeviceStore, DeviceMarker } from '../../src/store/deviceStore';
 import { useNetworkStore } from '../../src/store/networkStore';
+import { LocationTrackerService } from '../../src/services/location/LocationTrackerService';
 import { Colors, Spacing } from '../../src/utils/responsive';
 import { useLanguageStore } from '../../src/i18n';
 import { ErrorBoundary } from '../../src/components/ErrorBoundary';
@@ -22,6 +23,13 @@ export default function MapScreen() {
   const [selectedDevice, setSelectedDevice] = useState<DeviceMarker | null>(null);
   const [showBtModal, setShowBtModal] = useState(false);
 
+  useEffect(() => {
+    // Acquire native phone GPS & battery level on map screen load
+    LocationTrackerService.getInstance().acquireCurrentPosition().then(() => {
+      LocationTrackerService.getInstance().broadcastLocationPacket();
+    });
+  }, []);
+
   return (
     <ErrorBoundary fallbackTitle="Map View Error">
       <View style={[styles.container, { paddingTop: insets.top }]}>
@@ -32,6 +40,16 @@ export default function MapScreen() {
         </TouchableOpacity>
 
         <View style={styles.headerBtnGroup}>
+          <TouchableOpacity
+            style={styles.btBtn}
+            onPress={async () => {
+              await LocationTrackerService.getInstance().acquireCurrentPosition();
+              await LocationTrackerService.getInstance().broadcastLocationPacket();
+            }}
+          >
+            <Text style={styles.btBtnText}>📍 My Pin</Text>
+          </TouchableOpacity>
+
           <TouchableOpacity style={styles.btBtn} onPress={() => setShowBtModal(true)}>
             <Text style={styles.btBtnText}>🔌 Bluetooth</Text>
           </TouchableOpacity>

@@ -4,6 +4,7 @@ import path from 'path';
 const testFiles = [
   'test-lora-parser.ts',
   'test-ble-connection.ts',
+  'test-thorough-ble-e2e.ts',
   'test-mobile-sqlite.ts',
   'test-public-chat-jess-thanu.ts',
   'test-private-chat-jess-thanu.ts',

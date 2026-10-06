@@ -68,59 +68,57 @@ export const BluetoothConnectModal: React.FC<BluetoothConnectModalProps> = ({ vi
       if (success) {
         setConnectedDeviceId(dev.id);
         setLoraStatus(true);
-        const initialName = dev.name && dev.name !== 'ESP32 Gateway' ? dev.name : (user?.name || dev.id);
-        setCustomNodeName(initialName);
-        setPendingDev(dev);
+        const finalName = dev.name && !dev.name.includes('Gateway') && !dev.name.includes('Device')
+          ? dev.name.split(' ')[0].trim()
+          : (user?.name || dev.id);
+
+        // 1. Set Bluetooth service connected device name
+        btService.setConnectedDeviceName(finalName);
+
+        // 2. Set auth profile name
+        setAuth(
+          {
+            id: user?.id || Date.now(),
+            name: finalName,
+            email: user?.email || `${finalName.toLowerCase()}@mesh.node`,
+            language: user?.language || 'en',
+            status: 'online'
+          },
+          'mesh-token-123'
+        );
+
+        // 3. Send LOC handshake over Bluetooth to ESP32 / Radio Gateway
+        const now = new Date();
+        const timeStr = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+        const locHandshake = `LOC,${finalName},13.0827,80.2707,${timeStr},100`;
+        await btService.sendData(locHandshake);
+
+        // 4. Register node in deviceStore
+        useDeviceStore.getState().updateDeviceLocation(
+          finalName,
+          13.0827,
+          80.2707,
+          timeStr,
+          100,
+          finalName,
+          finalName
+        );
+
+        useNotificationStore.getState().addNotification(
+          'device',
+          '🔌 Gateway Connected',
+          `Connected to Bluetooth Radio "${finalName}". Data sharing active!`
+        );
+
+        Alert.alert('✓ Bluetooth Connected', `Connected to "${finalName}". Radio mesh data sharing active!`, [
+          { text: 'OK', onPress: () => onClose() }
+        ]);
       }
     } catch (err: any) {
-      Alert.alert('Connection Error', err.message);
+      Alert.alert('Connection Error', err.message || 'Unable to connect to Bluetooth device');
     } finally {
       setConnectingId(null);
     }
-  };
-
-  const handleConfirmName = async () => {
-    const finalName = customNodeName.trim() || pendingDev?.name || 'User';
-    
-    // 1. Set Bluetooth service connected device name
-    btService.setConnectedDeviceName(finalName);
-
-    // 2. Set auth profile name
-    setAuth(
-      {
-        id: user?.id || Date.now(),
-        name: finalName,
-        email: user?.email || `${finalName.toLowerCase()}@mesh.node`,
-        language: user?.language || 'en',
-        status: 'online'
-      },
-      'mesh-token-123'
-    );
-
-    // 3. Send LOC handshake over Bluetooth to ESP32
-    const now = new Date();
-    const timeStr = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
-    const locHandshake = `LOC,${finalName},13.0827,80.2707,${timeStr},100`;
-    await btService.sendData(locHandshake);
-
-    // 4. Register node in deviceStore
-    useDeviceStore.getState().updateDeviceLocation(
-      finalName,
-      13.0827,
-      80.2707,
-      timeStr,
-      100,
-      finalName,
-      finalName
-    );
-
-    setPendingDev(null);
-    useNotificationStore.getState().addNotification(
-      'device',
-      '🔌 Gateway Connected',
-      `Identified as "${finalName}". Connected to Bluetooth Gateway.`
-    );
-    Alert.alert('✓ Call Sign Saved', `Identified as "${finalName}". Connected to Bluetooth Gateway.`);
   };
 
   const handleDisconnect = async () => {
@@ -202,28 +200,6 @@ export const BluetoothConnectModal: React.FC<BluetoothConnectModalProps> = ({ vi
           >
             <Text style={styles.permissionBannerText}>🔑 Grant Mobile Bluetooth & Location Permissions ➔</Text>
           </TouchableOpacity>
-
-          {/* Custom Node Call Sign Setting Step */}
-          {pendingDev && (
-            <View style={styles.callSignCard}>
-              <Text style={styles.callSignTitle}>🏷️ Set Your Node Call Sign / Identity</Text>
-              <Text style={styles.callSignSub}>
-                Enter the call sign for this device (e.g. JESS, THANU, ASMI, KAVIN)
-              </Text>
-              <View style={styles.callSignInputRow}>
-                <TextInput
-                  style={styles.callSignInput}
-                  value={customNodeName}
-                  onChangeText={setCustomNodeName}
-                  placeholder="e.g. JESS or THANU"
-                  placeholderTextColor={Colors.textMuted}
-                />
-                <TouchableOpacity style={styles.saveCallSignBtn} onPress={handleConfirmName}>
-                  <Text style={styles.saveCallSignText}>Save & Broadcast ➔</Text>
-                </TouchableOpacity>
-              </View>
-            </View>
-          )}
 
           {/* Direct Paired Device Connection Card */}
           <View style={[styles.callSignCard, { backgroundColor: '#F4F5F7', borderColor: '#E4E4E7', marginBottom: Spacing.sm }]}>
@@ -309,8 +285,8 @@ export const BluetoothConnectModal: React.FC<BluetoothConnectModalProps> = ({ vi
               renderItem={({ item }) => {
                 const isCurrent = connectedDeviceId === item.id;
                 const isConnectingThis = connectingId === item.id;
-                const itemDisplayName = item.name && !item.name.includes('=') ? item.name : 'ESP32 LoRa Gateway';
-                const itemMetaId = item.id.includes('=') || item.id.length > 20 ? 'ESP32 Gateway' : item.id;
+                const itemDisplayName = item.name || item.id || 'Bluetooth Device';
+                const itemMetaId = item.id;
 
                 return (
                   <View style={[styles.deviceCard, isCurrent && styles.deviceCardActive]}>

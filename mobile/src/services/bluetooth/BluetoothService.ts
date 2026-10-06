@@ -23,7 +23,7 @@ export class BluetoothService {
   private connectedDeviceName: string | null = null;
   private isConnecting: boolean = false;
   private transportType: 'classic' | 'ble' | null = null;
-  
+
   private dataListeners: DataCallback[] = [];
   private statusListeners: StatusCallback[] = [];
   private rxBuffer: string = '';
@@ -31,7 +31,7 @@ export class BluetoothService {
   private webRxChar: any = null;
   private webTxChar: any = null;
   private pendingWebDevice: any = null;
-  private constructor() {}
+  private constructor() { }
 
   public static getInstance(): BluetoothService {
     if (!BluetoothService.instance) {
@@ -75,8 +75,25 @@ export class BluetoothService {
     }
   }
 
+  private bleManager: any = null;
+
+  private getBleManager(): any {
+    if (!this.bleManager && Platform.OS !== 'web') {
+      try {
+        const RN = require('react-native');
+        if (RN && RN.NativeModules && RN.NativeModules.BleManager) {
+          const { BleManager } = require('react-native-ble-plx');
+          this.bleManager = new BleManager();
+        }
+      } catch (e) {
+        // react-native-ble-plx is not supported on non-native environments (Node/Web)
+      }
+    }
+    return this.bleManager;
+  }
+
   /**
-   * Scans for real-time Bluetooth hardware devices (BLE Nordic UART / Classic SPP)
+   * Scans for real-time Bluetooth hardware devices (BLE Nordic UART / Classic SPP) using native mobile features
    */
   public async scanDevices(): Promise<BluetoothDevice[]> {
     await this.requestPermissions();
@@ -92,7 +109,50 @@ export class BluetoothService {
       });
     }
 
-    // Real-time Web Bluetooth API Scan if supported (Nordic UART & SPP GATT UUIDs)
+    // 1. Native Mobile Hardware Scan (react-native-ble-plx)
+    const manager = this.getBleManager();
+    if (manager && manager.startDeviceScan) {
+      try {
+        console.log('[BluetoothService] Starting native mobile Bluetooth hardware scan...');
+        await new Promise<void>((resolve) => {
+          const timeoutId = setTimeout(() => {
+            try { manager.stopDeviceScan(); } catch (_) {}
+            resolve();
+          }, 4000);
+
+          manager.startDeviceScan(
+            null,
+            { allowDuplicates: false },
+            (error: any, device: any) => {
+              if (error) {
+                console.warn('[BluetoothService] Native BLE Scan error:', error?.message);
+                clearTimeout(timeoutId);
+                try { manager.stopDeviceScan(); } catch (_) {}
+                resolve();
+                return;
+              }
+              if (device && (device.name || device.localName || device.id)) {
+                const devName = device.name || device.localName || `BLE Device (${device.id.slice(-5)})`;
+                const exists = discoveredDevices.some((d) => d.id === device.id);
+                if (!exists) {
+                  discoveredDevices.push({
+                    id: device.id,
+                    name: devName,
+                    address: device.id,
+                    rssi: device.rssi || -65,
+                    type: 'ble'
+                  });
+                }
+              }
+            }
+          );
+        });
+      } catch (e: any) {
+        console.warn('[BluetoothService] Native BLE hardware scan exception:', e?.message);
+      }
+    }
+
+    // 2. Real-time Web Bluetooth API Scan if supported (Nordic UART & SPP GATT UUIDs)
     if (typeof navigator !== 'undefined' && (navigator as any).bluetooth) {
       try {
         const device = await (navigator as any).bluetooth.requestDevice({
@@ -116,21 +176,6 @@ export class BluetoothService {
         console.log('[BluetoothService] Real-time Bluetooth scan cancelled or unselected:', err.message);
       }
     }
-
-    // Paired & Discovered Bluetooth hardware targets for mobile app connection
-    const defaultHardwareTargets: BluetoothDevice[] = [
-      { id: 'THANU', name: 'THANU (Paired LoRa Radio)', address: 'AA:BB:CC:44:55:66', rssi: -65, type: 'ble' },
-      { id: 'JESS', name: 'JESS (Paired LoRa Radio)', address: 'AA:BB:CC:11:22:33', rssi: -68, type: 'ble' },
-      { id: 'ESP32_GATEWAY', name: 'ESP32 LoRa Gateway', address: 'AA:BB:CC:77:88:99', rssi: -72, type: 'classic' },
-      { id: 'HELTEC_V3', name: 'Heltec LoRa V3 Node', address: 'AA:BB:CC:99:88:77', rssi: -75, type: 'ble' },
-      { id: 'HC05_SPP', name: 'HC-05 Classic SPP', address: 'AA:BB:CC:00:11:22', rssi: -78, type: 'classic' }
-    ];
-
-    defaultHardwareTargets.forEach((hw) => {
-      if (!discoveredDevices.some((d) => d.id === hw.id)) {
-        discoveredDevices.push(hw);
-      }
-    });
 
     return discoveredDevices;
   }
@@ -162,6 +207,8 @@ export class BluetoothService {
     return null;
   }
 
+  private nativeDevice: any = null;
+
   /**
    * Establishes connection to Classic SPP or BLE Gateway Hardware
    */
@@ -171,7 +218,42 @@ export class BluetoothService {
     console.log(`[BluetoothService] Connecting via ${type.toUpperCase()} to ${deviceId}...`);
 
     try {
-      // Connect Web Bluetooth GATT if supported
+      // 1. Connect native mobile BLE device via react-native-ble-plx if available
+      const manager = this.getBleManager();
+      if (manager && deviceId && typeof window === 'undefined') {
+        try {
+          console.log(`[BluetoothService] Connecting native mobile BLE hardware device ${deviceId}...`);
+          const device = await manager.connectToDevice(deviceId, { autoConnect: true });
+          await device.discoverAllServicesAndCharacteristics();
+          this.nativeDevice = device;
+          this.connectedDeviceId = deviceId;
+          this.connectedDeviceName = device.name || deviceId;
+          this.transportType = type;
+
+          // Monitor TX characteristic for incoming airborne LoRa packets
+          device.monitorCharacteristicForService(
+            BLE_SERVICE_UUID,
+            BLE_TX_UUID,
+            (error: any, characteristic: any) => {
+              if (error) {
+                console.warn('[BluetoothService] Native BLE monitor error:', error?.message);
+                return;
+              }
+              if (characteristic && characteristic.value) {
+                const textChunk = typeof Buffer !== 'undefined'
+                  ? Buffer.from(characteristic.value, 'base64').toString('utf-8')
+                  : atob(characteristic.value);
+                this.handleIncomingChunk(textChunk);
+              }
+            }
+          );
+          console.log(`[BluetoothService] Native BLE device ${deviceId} connected & GATT TX notification listener attached.`);
+        } catch (nativeConnectErr: any) {
+          console.warn('[BluetoothService] Native BLE connect notice:', nativeConnectErr?.message);
+        }
+      }
+
+      // 2. Connect Web Bluetooth GATT if supported
       if (typeof navigator !== 'undefined' && (navigator as any).bluetooth) {
         try {
           let device = this.pendingWebDevice;
@@ -193,7 +275,7 @@ export class BluetoothService {
             // Subscribe to incoming stream notifications & acquire write characteristic
             try {
               const service = await server.getPrimaryService(BLE_SERVICE_UUID);
-              
+
               // 1. Get RX Characteristic for writing Phone -> ESP32
               try {
                 this.webRxChar = await service.getCharacteristic(BLE_RX_UUID);
@@ -245,11 +327,17 @@ export class BluetoothService {
   public async disconnect(): Promise<void> {
     if (this.connectedDeviceId) {
       console.log(`[BluetoothService] Disconnecting from ${this.connectedDeviceId}...`);
+      if (this.nativeDevice && this.nativeDevice.cancelConnection) {
+        try {
+          this.nativeDevice.cancelConnection();
+        } catch (e) {}
+      }
       if (this.webGattServer && this.webGattServer.disconnect) {
         try {
           this.webGattServer.disconnect();
-        } catch (e) {}
+        } catch (e) { }
       }
+      this.nativeDevice = null;
       this.webGattServer = null;
       this.webRxChar = null;
       this.webTxChar = null;
@@ -289,7 +377,40 @@ export class BluetoothService {
     const payload = data.endsWith('\n') ? data : `${data}\n`;
     console.log(`[BluetoothService] Transmitting Outbound Packet via Bluetooth (${this.transportType || 'ble'}): "${data}"`);
 
-    // Write bytes to GATT characteristic if Web/Native Bluetooth GATT available
+    // 1. Write bytes to native react-native-ble-plx characteristic if connected on mobile
+    if (this.nativeDevice) {
+      try {
+        const base64Data = typeof Buffer !== 'undefined'
+          ? Buffer.from(payload).toString('base64')
+          : btoa(payload);
+
+        await this.nativeDevice.writeCharacteristicWithResponseForService(
+          BLE_SERVICE_UUID,
+          BLE_RX_UUID,
+          base64Data
+        );
+        console.log(`[BluetoothService] Native BLE transmission successful to ${this.connectedDeviceId}`);
+        return true;
+      } catch (err: any) {
+        console.warn('[BluetoothService] Native BLE write error, trying without response:', err?.message);
+        try {
+          const base64Data = typeof Buffer !== 'undefined'
+            ? Buffer.from(payload).toString('base64')
+            : btoa(payload);
+
+          await this.nativeDevice.writeCharacteristicWithoutResponseForService(
+            BLE_SERVICE_UUID,
+            BLE_RX_UUID,
+            base64Data
+          );
+          return true;
+        } catch (err2: any) {
+          console.error('[BluetoothService] Native BLE write failed:', err2?.message);
+        }
+      }
+    }
+
+    // 2. Write bytes to Web Bluetooth GATT characteristic if available
     const targetChar = this.webRxChar || this.webTxChar;
     if (targetChar) {
       try {
@@ -304,7 +425,7 @@ export class BluetoothService {
         }
         return true;
       } catch (err: any) {
-        console.warn('[BluetoothService] Error writing bytes to Bluetooth characteristic:', err.message);
+        console.warn('[BluetoothService] Error writing bytes to Web Bluetooth characteristic:', err.message);
       }
     }
     return true;
