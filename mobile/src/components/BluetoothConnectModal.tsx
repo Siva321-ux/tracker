@@ -35,10 +35,10 @@ export const BluetoothConnectModal: React.FC<BluetoothConnectModalProps> = ({ vi
     BluetoothService.getInstance().getConnectedDeviceId()
   );
 
-  // Custom Call Sign / Name confirmation state
-  const [pendingDev, setPendingDev] = useState<BluetoothDevice | null>(null);
-  const [customNodeName, setCustomNodeName] = useState<string>('');
-  const [customPairedName, setCustomPairedName] = useState<string>('');
+  // Post-connection Name Prompt state
+  const [showNamePrompt, setShowNamePrompt] = useState<boolean>(false);
+  const [connectedDevObj, setConnectedDevObj] = useState<BluetoothDevice | null>(null);
+  const [inputName, setInputName] = useState<string>('');
 
   const btService = BluetoothService.getInstance();
 
@@ -68,51 +68,15 @@ export const BluetoothConnectModal: React.FC<BluetoothConnectModalProps> = ({ vi
       if (success) {
         setConnectedDeviceId(dev.id);
         setLoraStatus(true);
-        const finalName = dev.name && !dev.name.includes('Gateway') && !dev.name.includes('Device')
-          ? dev.name.split(' ')[0].trim()
-          : (user?.name || dev.id);
+        setConnectedDevObj(dev);
 
-        // 1. Set Bluetooth service connected device name
-        btService.setConnectedDeviceName(finalName);
+        const initialName =
+          dev.name && !dev.name.includes('Gateway') && !dev.name.includes('Device')
+            ? dev.name.split(' ')[0].trim()
+            : user?.name || 'JESS';
 
-        // 2. Set auth profile name
-        setAuth(
-          {
-            id: user?.id || Date.now(),
-            name: finalName,
-            email: user?.email || `${finalName.toLowerCase()}@mesh.node`,
-            language: user?.language || 'en',
-            status: 'online'
-          },
-          'mesh-token-123'
-        );
-
-        // 3. Send LOC handshake over Bluetooth to ESP32 / Radio Gateway
-        const now = new Date();
-        const timeStr = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
-        const locHandshake = `LOC,${finalName},13.0827,80.2707,${timeStr},100`;
-        await btService.sendData(locHandshake);
-
-        // 4. Register node in deviceStore
-        useDeviceStore.getState().updateDeviceLocation(
-          finalName,
-          13.0827,
-          80.2707,
-          timeStr,
-          100,
-          finalName,
-          finalName
-        );
-
-        useNotificationStore.getState().addNotification(
-          'device',
-          '🔌 Gateway Connected',
-          `Connected to Bluetooth Radio "${finalName}". Data sharing active!`
-        );
-
-        Alert.alert('✓ Bluetooth Connected', `Connected to "${finalName}". Radio mesh data sharing active!`, [
-          { text: 'OK', onPress: () => onClose() }
-        ]);
+        setInputName(initialName);
+        setShowNamePrompt(true);
       }
     } catch (err: any) {
       Alert.alert('Connection Error', err.message || 'Unable to connect to Bluetooth device');
@@ -121,19 +85,67 @@ export const BluetoothConnectModal: React.FC<BluetoothConnectModalProps> = ({ vi
     }
   };
 
+  const handleSaveNameAndActivate = async (customName?: string) => {
+    const finalName = (customName !== undefined ? customName : inputName).trim() || user?.name || 'JESS';
+
+    // 1. Set Bluetooth service connected device name
+    btService.setConnectedDeviceName(finalName);
+
+    // 2. Set auth profile name
+    setAuth(
+      {
+        id: user?.id || Date.now(),
+        name: finalName,
+        email: user?.email || `${finalName.toLowerCase()}@mesh.node`,
+        language: user?.language || 'en',
+        status: 'online'
+      },
+      'mesh-token-123'
+    );
+
+    // 3. Send LOC handshake over Bluetooth to ESP32 / Radio Gateway
+    const now = new Date();
+    const timeStr = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+    const locHandshake = `LOC,${finalName},13.0827,80.2707,${timeStr},100`;
+    try {
+      await btService.sendData(locHandshake);
+    } catch (e) {
+      console.log('Telemetry handshake notice:', e);
+    }
+
+    // 4. Register node in deviceStore
+    useDeviceStore.getState().updateDeviceLocation(
+      finalName,
+      13.0827,
+      80.2707,
+      timeStr,
+      100,
+      finalName,
+      finalName
+    );
+
+    useNotificationStore.getState().addNotification(
+      'device',
+      '🔌 Gateway Connected',
+      `Connected to Bluetooth Radio "${finalName}". Data sharing active!`
+    );
+
+    setShowNamePrompt(false);
+    Alert.alert('✓ Bluetooth Connected', `Connected to "${finalName}". Radio mesh data sharing active!`, [
+      { text: 'OK', onPress: () => onClose() }
+    ]);
+  };
+
   const handleDisconnect = async () => {
     await btService.disconnect();
     setConnectedDeviceId(null);
-    setPendingDev(null);
+    setConnectedDevObj(null);
+    setShowNamePrompt(false);
     setLoraStatus(false);
     
-    // Purge generic 'User' placeholder entries from deviceStore on disconnect
-    useDeviceStore.setState((state) => {
-      const next = { ...state.devices };
-      delete next['User'];
-      delete next['ESP32 Gateway'];
-      return { devices: next };
-    });
+    // Purge devices & reset auth store on disconnect
+    useDeviceStore.getState().clearDevices();
+    useAuthStore.getState().logout();
 
     useNotificationStore.getState().addNotification(
       'device',
@@ -179,143 +191,147 @@ export const BluetoothConnectModal: React.FC<BluetoothConnectModalProps> = ({ vi
                 <Text style={styles.connectedTitle}>🟢 Gateway Active</Text>
                 <Text style={styles.connectedSub}>{displayGatewayName} • Protocol: LOC & CHAT Packets</Text>
               </View>
-              <TouchableOpacity style={styles.disconnectBtn} onPress={handleDisconnect}>
-                <Text style={styles.disconnectBtnText}>Disconnect</Text>
-              </TouchableOpacity>
+              <View style={{ flexDirection: 'row', gap: 6 }}>
+                <TouchableOpacity
+                  style={[styles.disconnectBtn, { backgroundColor: '#2563EB' }]}
+                  onPress={() => {
+                    setInputName(rawDevName || user?.name || 'JESS');
+                    setShowNamePrompt(true);
+                  }}
+                >
+                  <Text style={styles.disconnectBtnText}>✏️ Edit Name</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.disconnectBtn} onPress={handleDisconnect}>
+                  <Text style={styles.disconnectBtnText}>Disconnect</Text>
+                </TouchableOpacity>
+              </View>
             </View>
           )}
 
-          {/* Permission Prompt Banner */}
-          <TouchableOpacity
-            style={styles.permissionBanner}
-            onPress={async () => {
-              const ok = await btService.requestPermissions();
-              if (ok) {
-                Alert.alert('✓ Permissions Granted', 'Bluetooth Scan & Location permissions enabled.');
-                handleScan();
-              } else {
-                Alert.alert('Permission Required', 'Please allow Bluetooth and Location permissions in phone Settings.');
-              }
-            }}
-          >
-            <Text style={styles.permissionBannerText}>🔑 Grant Mobile Bluetooth & Location Permissions ➔</Text>
-          </TouchableOpacity>
-
-          {/* Direct Paired Device Connection Card */}
-          <View style={[styles.callSignCard, { backgroundColor: '#F4F5F7', borderColor: '#E4E4E7', marginBottom: Spacing.sm }]}>
-            <Text style={[styles.callSignTitle, { color: Colors.textPrimary }]}>📱 Connect Paired Phone Bluetooth Device</Text>
-            <Text style={styles.callSignSub}>
-              Select or type your paired Bluetooth name (e.g. THANU, JESS, ESP32 Gateway, HC-05)
-            </Text>
-            <View style={styles.callSignInputRow}>
-              <TextInput
-                style={[styles.callSignInput, { backgroundColor: '#FFFFFF' }]}
-                value={customPairedName}
-                onChangeText={setCustomPairedName}
-                placeholder="Enter Paired Device Name (e.g. THANU or JESS)"
-                placeholderTextColor={Colors.textMuted}
-              />
-              <TouchableOpacity
-                style={[styles.saveCallSignBtn, { backgroundColor: '#18181B' }]}
-                onPress={() => {
-                  const target = customPairedName.trim();
-                  if (!target) {
-                    Alert.alert('Device Name Required', 'Please enter your paired Bluetooth device name (e.g. THANU or JESS).');
-                    return;
-                  }
-                  handleConnect({
-                    id: target,
-                    name: `${target} (Paired Radio)`,
-                    address: target,
-                    rssi: -65,
-                    type: 'ble'
-                  });
-                }}
-              >
-                <Text style={styles.saveCallSignText}>Connect & Pair ➔</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-
-          {/* Scan Action Row */}
-          <View style={styles.scanRow}>
-            <Text style={styles.sectionLabel}>Available Bluetooth Devices ({devices.length}):</Text>
-            <View style={{ flexDirection: 'row', gap: 6 }}>
-              <TouchableOpacity
-                style={[styles.rescanBtn, { backgroundColor: Colors.primary }]}
-                onPress={async () => {
-                  setIsScanning(true);
-                  try {
-                    const hwDev = await btService.scanHardwareWebBluetooth();
-                    if (hwDev) {
-                      setDevices((prev) => [hwDev, ...prev.filter((d) => d.id !== hwDev.id)]);
-                    }
-                  } catch (e) {}
-                  setIsScanning(false);
-                }}
-              >
-                <Text style={[styles.rescanBtnText, { color: '#FFFFFF' }]}>🔍 Hardware Scan</Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity style={styles.rescanBtn} onPress={handleScan} disabled={isScanning}>
-                <Text style={styles.rescanBtnText}>{isScanning ? 'Scanning...' : '🔄 Rescan'}</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-
-          {/* Devices List */}
-          {isScanning ? (
-            <View style={styles.loadingBox}>
-              <ActivityIndicator size="large" color="#18181B" />
-              <Text style={styles.loadingText}>Scanning for nearby LoRa Bluetooth gateways...</Text>
+          {/* Post-Connection Name Entry Prompt */}
+          {showNamePrompt ? (
+            <View style={styles.postConnectCard}>
+              <Text style={styles.postConnectBadge}>🟢 Bluetooth Connected!</Text>
+              <Text style={styles.postConnectTitle}>Enter Device / Call Sign Name</Text>
+              <Text style={styles.postConnectSub}>
+                Connected to Bluetooth hardware ({connectedDevObj?.name || connectedDevObj?.id || displayGatewayName}). Enter the device call sign name to show on field maps & chat:
+              </Text>
+              <View style={styles.callSignInputRow}>
+                <TextInput
+                  style={styles.callSignInput}
+                  value={inputName}
+                  onChangeText={setInputName}
+                  placeholder="Enter Call Sign / Device Name (e.g. THANU, JESS)"
+                  placeholderTextColor={Colors.textMuted}
+                  autoFocus
+                />
+                <TouchableOpacity
+                  style={styles.saveCallSignBtn}
+                  onPress={() => handleSaveNameAndActivate()}
+                >
+                  <Text style={styles.saveCallSignText}>Set Name & Connect ➔</Text>
+                </TouchableOpacity>
+              </View>
             </View>
           ) : (
-            <FlatList
-              data={devices}
-              keyExtractor={(item) => item.id}
-              contentContainerStyle={styles.deviceList}
-              ListEmptyComponent={
-                <View style={styles.emptyBox}>
-                  <Text style={styles.emptyTitle}>📡 No Bluetooth Devices Found</Text>
-                  <Text style={styles.emptySubText}>
-                    Ensure your ESP32 or Heltec LoRa gateway is powered ON and Bluetooth is active.
-                  </Text>
-                </View>
-              }
-              renderItem={({ item }) => {
-                const isCurrent = connectedDeviceId === item.id;
-                const isConnectingThis = connectingId === item.id;
-                const itemDisplayName = item.name || item.id || 'Bluetooth Device';
-                const itemMetaId = item.id;
+            <>
+              {/* Permission Prompt Banner */}
+              <TouchableOpacity
+                style={styles.permissionBanner}
+                onPress={async () => {
+                  const ok = await btService.requestPermissions();
+                  if (ok) {
+                    Alert.alert('✓ Permissions Granted', 'Bluetooth Scan & Location permissions enabled.');
+                    handleScan();
+                  } else {
+                    Alert.alert('Permission Required', 'Please allow Bluetooth and Location permissions in phone Settings.');
+                  }
+                }}
+              >
+                <Text style={styles.permissionBannerText}>🔑 Grant Mobile Bluetooth & Location Permissions ➔</Text>
+              </TouchableOpacity>
 
-                return (
-                  <View style={[styles.deviceCard, isCurrent && styles.deviceCardActive]}>
-                    <View style={styles.deviceInfo}>
-                      <Text style={styles.deviceName}>📡 {itemDisplayName}</Text>
-                      <Text style={styles.deviceMeta}>
-                        ID: {itemMetaId} • Signal: {item.rssi || -70} dBm
+              {/* Scan Action Row */}
+              <View style={styles.scanRow}>
+                <Text style={styles.sectionLabel}>Available Bluetooth Devices ({devices.length}):</Text>
+                <View style={{ flexDirection: 'row', gap: 6 }}>
+                  <TouchableOpacity
+                    style={[styles.rescanBtn, { backgroundColor: Colors.primary }]}
+                    onPress={async () => {
+                      setIsScanning(true);
+                      try {
+                        const hwDev = await btService.scanHardwareWebBluetooth();
+                        if (hwDev) {
+                          setDevices((prev) => [hwDev, ...prev.filter((d) => d.id !== hwDev.id)]);
+                        }
+                      } catch (e) {}
+                      setIsScanning(false);
+                    }}
+                  >
+                    <Text style={[styles.rescanBtnText, { color: '#FFFFFF' }]}>🔍 Hardware Scan</Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity style={styles.rescanBtn} onPress={handleScan} disabled={isScanning}>
+                    <Text style={styles.rescanBtnText}>{isScanning ? 'Scanning...' : '🔄 Rescan'}</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+
+              {/* Devices List */}
+              {isScanning ? (
+                <View style={styles.loadingBox}>
+                  <ActivityIndicator size="large" color="#18181B" />
+                  <Text style={styles.loadingText}>Scanning for nearby LoRa Bluetooth gateways...</Text>
+                </View>
+              ) : (
+                <FlatList
+                  data={devices}
+                  keyExtractor={(item) => item.id}
+                  contentContainerStyle={styles.deviceList}
+                  ListEmptyComponent={
+                    <View style={styles.emptyBox}>
+                      <Text style={styles.emptyTitle}>📡 No Bluetooth Devices Found</Text>
+                      <Text style={styles.emptySubText}>
+                        Ensure your ESP32 or Heltec LoRa gateway is powered ON and Bluetooth is active.
                       </Text>
                     </View>
+                  }
+                  renderItem={({ item }) => {
+                    const isCurrent = connectedDeviceId === item.id;
+                    const isConnectingThis = connectingId === item.id;
+                    const itemDisplayName = item.name || item.id || 'Bluetooth Device';
+                    const itemMetaId = item.id;
 
-                    {isCurrent ? (
-                      <View style={styles.activeTag}>
-                        <Text style={styles.activeTagText}>✓ Connected</Text>
+                    return (
+                      <View style={[styles.deviceCard, isCurrent && styles.deviceCardActive]}>
+                        <View style={styles.deviceInfo}>
+                          <Text style={styles.deviceName}>📡 {itemDisplayName}</Text>
+                          <Text style={styles.deviceMeta}>
+                            ID: {itemMetaId} • Signal: {item.rssi || -70} dBm
+                          </Text>
+                        </View>
+
+                        {isCurrent ? (
+                          <View style={styles.activeTag}>
+                            <Text style={styles.activeTagText}>✓ Connected</Text>
+                          </View>
+                        ) : (
+                          <TouchableOpacity
+                            style={styles.connectBtn}
+                            onPress={() => handleConnect(item)}
+                            disabled={isConnectingThis}
+                          >
+                            <Text style={styles.connectBtnText}>
+                              {isConnectingThis ? 'Connecting...' : 'Connect'}
+                            </Text>
+                          </TouchableOpacity>
+                        )}
                       </View>
-                    ) : (
-                      <TouchableOpacity
-                        style={styles.connectBtn}
-                        onPress={() => handleConnect(item)}
-                        disabled={isConnectingThis}
-                      >
-                        <Text style={styles.connectBtnText}>
-                          {isConnectingThis ? 'Connecting...' : 'Connect'}
-                        </Text>
-                      </TouchableOpacity>
-                    )}
-                  </View>
-                );
-              }}
-            />
+                    );
+                  }}
+                />
+              )}
+            </>
           )}
         </View>
       </View>
@@ -592,5 +608,33 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     fontSize: 12,
     fontFamily: 'OpenSans_700Bold'
+  },
+  postConnectCard: {
+    backgroundColor: '#F0FDF4',
+    borderWidth: 1,
+    borderColor: '#86EFAC',
+    borderRadius: 16,
+    padding: Spacing.md + 2,
+    marginBottom: Spacing.md
+  },
+  postConnectBadge: {
+    color: '#15803D',
+    fontSize: 12,
+    fontWeight: 'bold',
+    fontFamily: 'OpenSans_700Bold',
+    marginBottom: 4
+  },
+  postConnectTitle: {
+    color: Colors.textPrimary,
+    fontSize: 16,
+    fontWeight: 'bold',
+    fontFamily: 'OpenSans_700Bold',
+    marginBottom: 4
+  },
+  postConnectSub: {
+    color: Colors.textSecondary,
+    fontSize: 12,
+    fontFamily: 'OpenSans_400Regular',
+    marginBottom: Spacing.sm
   }
 });

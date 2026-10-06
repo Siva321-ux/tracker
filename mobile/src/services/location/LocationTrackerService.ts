@@ -154,15 +154,24 @@ export class LocationTrackerService {
    * Formats location & battery telemetry, updates map pins, and transmits over Bluetooth
    */
   public async broadcastLocationPacket(): Promise<void> {
-    const user = useAuthStore.getState().user;
     const btService = BluetoothService.getInstance();
+    const isConnected = btService.isConnected();
+
+    // If Bluetooth is NOT connected, do NOT create ghost map pins
+    if (!isConnected) {
+      console.log('[LocationTrackerService] Bluetooth disconnected. Skipping map pin update.');
+      return;
+    }
+
     const connectedNode = btService.getConnectedDeviceName();
-    const deviceId = user?.name || connectedNode || 'Mobile Node';
+    const user = useAuthStore.getState().user;
+    const deviceId = connectedNode || user?.name || 'ESP32 Gateway';
+
     const now = new Date();
     const timeStr = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
     const battery = await this.acquireBatteryLevel();
 
-    // 1. ALWAYS update local deviceStore map pin & SQLite DB
+    // 1. Update local deviceStore map pin & SQLite DB
     useDeviceStore.getState().updateDeviceLocation(
       deviceId,
       this.currentLat,
@@ -177,11 +186,9 @@ export class LocationTrackerService {
       console.error('[LocationTrackerService] Error saving location locally:', err)
     );
 
-    // 2. Broadcast over Bluetooth hardware stream if connected
-    if (btService.isConnected()) {
-      const locPacket = `LOC,${deviceId},${this.currentLat.toFixed(4)},${this.currentLon.toFixed(4)},${timeStr},${battery}`;
-      console.log(`[LocationTrackerService] Transmitting auto-location packet over Bluetooth: "${locPacket}"`);
-      await btService.sendData(locPacket);
-    }
+    // 2. Broadcast over Bluetooth hardware stream
+    const locPacket = `LOC,${deviceId},${this.currentLat.toFixed(4)},${this.currentLon.toFixed(4)},${timeStr},${battery}`;
+    console.log(`[LocationTrackerService] Transmitting auto-location packet over Bluetooth: "${locPacket}"`);
+    await btService.sendData(locPacket);
   }
 }

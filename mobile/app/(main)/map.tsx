@@ -13,6 +13,10 @@ import { Colors, Spacing } from '../../src/utils/responsive';
 import { useLanguageStore } from '../../src/i18n';
 import { ErrorBoundary } from '../../src/components/ErrorBoundary';
 
+import { Alert } from 'react-native';
+import { BluetoothService } from '../../src/services/bluetooth/BluetoothService';
+import { useAuthStore } from '../../src/store/authStore';
+
 export default function MapScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
@@ -24,10 +28,15 @@ export default function MapScreen() {
   const [showBtModal, setShowBtModal] = useState(false);
 
   useEffect(() => {
-    // Acquire native phone GPS & battery level on map screen load
-    LocationTrackerService.getInstance().acquireCurrentPosition().then(() => {
-      LocationTrackerService.getInstance().broadcastLocationPacket();
-    });
+    // If Bluetooth is not connected, purge stale markers & auth session from memory
+    if (!BluetoothService.getInstance().isConnected()) {
+      useDeviceStore.getState().clearDevices();
+      useAuthStore.getState().logout();
+    } else {
+      LocationTrackerService.getInstance().acquireCurrentPosition().then(() => {
+        LocationTrackerService.getInstance().broadcastLocationPacket();
+      });
+    }
   }, []);
 
   return (
@@ -43,6 +52,14 @@ export default function MapScreen() {
           <TouchableOpacity
             style={styles.btBtn}
             onPress={async () => {
+              if (!BluetoothService.getInstance().isConnected()) {
+                Alert.alert(
+                  '🔌 Bluetooth Required',
+                  'Please connect to an ESP32 or Bluetooth Gateway first to set your node call sign & share map telemetry.',
+                  [{ text: 'Connect Bluetooth', onPress: () => setShowBtModal(true) }, { text: 'Cancel' }]
+                );
+                return;
+              }
               await LocationTrackerService.getInstance().acquireCurrentPosition();
               await LocationTrackerService.getInstance().broadcastLocationPacket();
             }}

@@ -7,10 +7,16 @@ import { Colors, Spacing } from '../../src/utils/responsive';
 import { useLanguageStore } from '../../src/i18n';
 import { ErrorBoundary } from '../../src/components/ErrorBoundary';
 
+import { useNetworkStore } from '../../src/store/networkStore';
+import { BluetoothService } from '../../src/services/bluetooth/BluetoothService';
+
 export default function TeamScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const t = useLanguageStore((s) => s.t);
+  const isLoraConnected = useNetworkStore((s) => s.isLoraConnected);
+  const btService = BluetoothService.getInstance();
+  const connectedBtName = btService.getConnectedDeviceName();
 
   const devices = useDeviceStore((s) =>
     Object.values(s.devices).filter((d) => {
@@ -38,55 +44,67 @@ export default function TeamScreen() {
           keyExtractor={(item) => item.deviceId}
           contentContainerStyle={styles.listContainer}
           showsVerticalScrollIndicator={false}
-          renderItem={({ item }) => (
-            <View style={styles.memberCard}>
-              <View style={styles.cardHeader}>
-                <View style={styles.userInfo}>
-                  <Text style={styles.statusDot}>
-                    {item.status === 'online' ? '🟢' : '🔴'}
-                  </Text>
-                  <View style={styles.nameColumn}>
-                    <Text style={styles.userName} numberOfLines={1}>
-                      {item.userName || item.deviceName}
+          ListEmptyComponent={
+            <View style={styles.emptyBox}>
+              <Text style={styles.emptyTitle}>📡 No Active Connected Nodes</Text>
+              <Text style={styles.emptySubText}>
+                Connect to an ESP32 or Bluetooth LoRa gateway in the top bar to share location & see field team members.
+              </Text>
+            </View>
+          }
+          renderItem={({ item }) => {
+            const isThisNodeBtActive = isLoraConnected && btService.isConnected();
+
+            return (
+              <View style={styles.memberCard}>
+                <View style={styles.cardHeader}>
+                  <View style={styles.userInfo}>
+                    <Text style={styles.statusDot}>
+                      {item.status === 'online' ? '🟢' : '🔴'}
                     </Text>
-                    <Text style={styles.deviceCode}>
-                      {t('person')} ID: {item.deviceId}
-                    </Text>
+                    <View style={styles.nameColumn}>
+                      <Text style={styles.userName} numberOfLines={1}>
+                        {item.userName || item.deviceName}
+                      </Text>
+                      <Text style={styles.deviceCode}>
+                        {t('person')} ID: {item.deviceId}
+                      </Text>
+                    </View>
+                  </View>
+
+                  <View style={styles.batteryTag}>
+                    <Text style={styles.batteryText}>🔋 {item.batteryOrValue}%</Text>
                   </View>
                 </View>
 
-                <View style={styles.batteryTag}>
-                  <Text style={styles.batteryText}>🔋 {item.batteryOrValue}%</Text>
+                <View style={styles.metaRow}>
+                  <Text style={styles.metaText} numberOfLines={1}>
+                    ⏱ {t('last_seen')}: {item.lastUpdated}
+                  </Text>
+
+                  <Text style={[styles.metaText, isThisNodeBtActive ? { color: '#15803D', fontWeight: 'bold' } : {}]} numberOfLines={1}>
+                    {isThisNodeBtActive ? '📡 Bluetooth Connected' : '📱 Standalone Mobile'}
+                  </Text>
+                </View>
+
+                <View style={styles.actionRow}>
+                  <TouchableOpacity
+                    style={styles.actionBtnPrimary}
+                    onPress={() => router.push('/map')}
+                  >
+                    <Text style={styles.actionBtnTextPrimary}>🗺 {t('view_on_map')}</Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    style={styles.actionBtnSecondary}
+                    onPress={() => router.push('/chat')}
+                  >
+                    <Text style={styles.actionBtnTextSecondary}>💬 {t('chat')}</Text>
+                  </TouchableOpacity>
                 </View>
               </View>
-
-              <View style={styles.metaRow}>
-                <Text style={styles.metaText} numberOfLines={1}>
-                  ⏱ {t('last_seen')}: {item.lastUpdated}
-                </Text>
-
-                <Text style={styles.metaText} numberOfLines={1}>
-                  📡 {t('bluetooth_connected')}
-                </Text>
-              </View>
-
-              <View style={styles.actionRow}>
-                <TouchableOpacity
-                  style={styles.actionBtnPrimary}
-                  onPress={() => router.push('/map')}
-                >
-                  <Text style={styles.actionBtnTextPrimary}>🗺 {t('view_on_map')}</Text>
-                </TouchableOpacity>
-
-                <TouchableOpacity
-                  style={styles.actionBtnSecondary}
-                  onPress={() => router.push('/chat')}
-                >
-                  <Text style={styles.actionBtnTextSecondary}>💬 {t('chat')}</Text>
-                </TouchableOpacity>
-              </View>
-            </View>
-          )}
+            );
+          }}
         />
       </View>
     </View>
@@ -232,5 +250,29 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     fontSize: 12,
     fontFamily: 'OpenSans_600SemiBold'
+  },
+  emptyBox: {
+    padding: Spacing.xl,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: Colors.card,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderStyle: 'dashed',
+    borderColor: Colors.cardBorder,
+    marginTop: Spacing.md
+  },
+  emptyTitle: {
+    color: Colors.textPrimary,
+    fontSize: 15,
+    fontWeight: 'bold',
+    fontFamily: 'OpenSans_700Bold',
+    marginBottom: 6
+  },
+  emptySubText: {
+    color: Colors.textMuted,
+    fontSize: 12,
+    textAlign: 'center',
+    fontFamily: 'OpenSans_400Regular'
   }
 });
