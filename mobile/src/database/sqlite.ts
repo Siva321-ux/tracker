@@ -150,6 +150,14 @@ class WebMobileDatabase {
       return this.tables.locations.filter((l: any) => l.device_id === devId);
     }
 
+    if (trimmed.includes('FROM PUBLIC_MESSAGES')) {
+      return this.tables.public_messages;
+    }
+
+    if (trimmed.includes('FROM PRIVATE_MESSAGES')) {
+      return this.tables.private_messages;
+    }
+
     return [];
   }
 }

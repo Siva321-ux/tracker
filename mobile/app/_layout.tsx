@@ -8,6 +8,7 @@ import { BluetoothService } from '../src/services/bluetooth/BluetoothService';
 import { LoraPacketParser } from '../src/services/lora/LoraPacketParser';
 import { useDeviceStore } from '../src/store/deviceStore';
 import { saveLocationLocally } from '../src/database/dbQueries';
+import { LocationTrackerService } from '../src/services/location/LocationTrackerService';
 import { Colors } from '../src/utils/responsive';
 
 export default function RootLayout() {
@@ -30,14 +31,31 @@ export default function RootLayout() {
 
     initMobileDatabase().catch((err) => console.error('Mobile DB init error:', err));
 
+    // Request native Bluetooth & Location runtime permissions on mobile launch
+    BluetoothService.getInstance().requestPermissions().catch((err) =>
+      console.warn('[RootLayout] Bluetooth permission request error:', err)
+    );
+
+    // Start automatic location tracking & Bluetooth telemetry broadcasting
+    LocationTrackerService.getInstance().startTracking(10000);
+
     const unsubscribe = BluetoothService.getInstance().onDataReceived((rawPacket) => {
       const parsed = LoraPacketParser.parse(rawPacket);
-      if (parsed && parsed.type === 'LOC') {
+      if (!parsed) return;
+
+      if (parsed.type === 'LOC') {
         const { deviceId, latitude, longitude, time, value } = parsed;
-        useDeviceStore.getState().updateDeviceLocation(deviceId, latitude, longitude, time, value);
+        useDeviceStore.getState().updateDeviceLocation(deviceId, latitude, longitude, time, value, deviceId, deviceId);
         saveLocationLocally(deviceId, latitude, longitude, value, time).catch((err) =>
           console.error('Failed to save packet to SQLite:', err)
         );
+      } else if (parsed.type === 'CHAT' || parsed.type === 'PUBLIC') {
+        const sender = parsed.senderId;
+        if (sender) {
+          const now = new Date();
+          const timeStr = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+          useDeviceStore.getState().updateDeviceLocation(sender, 13.0827, 80.2707, timeStr, 100, sender, sender);
+        }
       }
     });
 

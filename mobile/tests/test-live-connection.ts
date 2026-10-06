@@ -31,8 +31,8 @@ async function testFrontendBackendConnection() {
       email: testEmail,
       password: testPass
     });
-    console.log('  └─ ✅ Registration Successful! User ID:', regRes.data?.user?.id || 'OK');
-    userToken = regRes.data?.token || null;
+    console.log('  └─ ✅ Registration Successful! User ID:', regRes.user?.id || regRes.id || 'OK');
+    userToken = regRes.token || null;
   } catch (err: any) {
     console.log('  └─ Registration info:', err.message);
     // If registration fails because user exists, attempt login
@@ -42,8 +42,8 @@ async function testFrontendBackendConnection() {
         email: testEmail,
         password: testPass
       });
-      console.log('  └─ ✅ Login Successful! User ID:', loginRes.data?.user?.id || 'OK');
-      userToken = loginRes.data?.token || null;
+      console.log('  └─ ✅ Login Successful! User ID:', loginRes.user?.id || loginRes.id || 'OK');
+      userToken = loginRes.token || null;
     } catch (loginErr: any) {
       console.error('  └─ ❌ Login failed:', loginErr.message);
     }

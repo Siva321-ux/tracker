@@ -86,15 +86,23 @@ export const FieldMapView: React.FC<MapViewProps> = ({
       <body>
         <div id="map"></div>
         <script>
-          var map = L.map('map', { zoomControl: true }).setView([${center.lat}, ${center.lon}], ${zoomLevel});
+          var map = L.map('map', {
+            zoomControl: true,
+            fadeAnimation: false,
+            markerZoomAnimation: true
+          }).setView([${center.lat}, ${center.lon}], ${zoomLevel});
           
           L.tileLayer('${tileUrl}', {
-            maxZoom: 19
+            maxZoom: 19,
+            keepBuffer: 8,
+            updateWhenIdle: false,
+            updateWhenZooming: false,
+            crossOrigin: true
           }).addTo(map);
 
-          setTimeout(function() {
-            map.invalidateSize();
-          }, 300);
+          map.invalidateSize();
+          setTimeout(function() { map.invalidateSize(); }, 100);
+          setTimeout(function() { map.invalidateSize(); }, 300);
 
           var markersData = ${markersJson};
           markersData.forEach(function(m) {

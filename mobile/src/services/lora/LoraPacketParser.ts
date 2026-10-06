@@ -56,6 +56,13 @@ export class LoraPacketParser {
     const packetType = parts[0].toUpperCase();
 
     try {
+      if (trimmed.startsWith('MSG,COMMON,')) {
+        return LoraPacketParser.parseMsgCommonPacket(parts, trimmed);
+      }
+      if (trimmed.startsWith('MSG,PRIVATE,')) {
+        return LoraPacketParser.parseMsgPrivatePacket(parts, trimmed);
+      }
+
       switch (packetType) {
         case 'LOC':
           return LoraPacketParser.parseLocPacket(parts, trimmed);
@@ -126,6 +133,42 @@ export class LoraPacketParser {
     const senderId = parts[1].trim();
     const receiverId = parts[2].trim();
     const message = parts.slice(3).join(',').trim(); // Handle commas inside message body
+
+    if (!senderId || !receiverId || !message) return null;
+
+    return {
+      type: 'CHAT',
+      senderId,
+      receiverId,
+      message,
+      raw
+    };
+  }
+
+  private static parseMsgCommonPacket(parts: string[], raw: string): ParsedPublicPacket | null {
+    // Format: MSG,COMMON,SENDER_ID,ALL,MESSAGE
+    if (parts.length < 5) return null;
+    const senderId = parts[2].trim();
+    const teamId = parts[3].trim();
+    const message = parts.slice(4).join(',').trim();
+
+    if (!senderId || !message) return null;
+
+    return {
+      type: 'PUBLIC',
+      senderId,
+      teamId: teamId || 'ALL',
+      message,
+      raw
+    };
+  }
+
+  private static parseMsgPrivatePacket(parts: string[], raw: string): ParsedChatPacket | null {
+    // Format: MSG,PRIVATE,SENDER_ID,RECEIVER_ID,MESSAGE
+    if (parts.length < 5) return null;
+    const senderId = parts[2].trim();
+    const receiverId = parts[3].trim();
+    const message = parts.slice(4).join(',').trim();
 
     if (!senderId || !receiverId || !message) return null;
 

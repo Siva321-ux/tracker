@@ -18,7 +18,7 @@ export default function MapScreen() {
   const t = useLanguageStore((s) => s.t);
 
   const devices = useDeviceStore((s) => s.devices);
-  const { isOnline, isLoraConnected, toggleNetwork } = useNetworkStore();
+  const { isOnline, isLoraConnected } = useNetworkStore();
   const [selectedDevice, setSelectedDevice] = useState<DeviceMarker | null>(null);
   const [showBtModal, setShowBtModal] = useState(false);
 
@@ -34,12 +34,6 @@ export default function MapScreen() {
         <View style={styles.headerBtnGroup}>
           <TouchableOpacity style={styles.btBtn} onPress={() => setShowBtModal(true)}>
             <Text style={styles.btBtnText}>🔌 Bluetooth</Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity style={styles.netToggleBtn} onPress={toggleNetwork}>
-            <Text style={styles.netToggleText}>
-              {isOnline ? t('simulate_offline') : t('go_online')}
-            </Text>
           </TouchableOpacity>
         </View>
       </View>
@@ -113,20 +107,6 @@ const styles = StyleSheet.create({
   },
   btBtnText: {
     color: Colors.textPrimary,
-    fontSize: 12,
-    fontWeight: 'bold',
-    fontFamily: 'OpenSans_700Bold'
-  },
-  netToggleBtn: {
-    backgroundColor: '#18181B',
-    paddingHorizontal: Spacing.md,
-    paddingVertical: Spacing.xs + 3,
-    borderRadius: 20,
-    borderWidth: 1,
-    borderColor: '#27272A'
-  },
-  netToggleText: {
-    color: '#FFFFFF',
     fontSize: 12,
     fontWeight: 'bold',
     fontFamily: 'OpenSans_700Bold'

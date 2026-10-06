@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -12,11 +12,18 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ChatBubble, ChatMessage } from '../../src/components/ChatBubble';
-import { savePrivateMessageLocally } from '../../src/database/dbQueries';
+import {
+  savePublicMessageLocally,
+  savePrivateMessageLocally,
+  getPublicMessagesLocally,
+  getPrivateMessagesLocally
+} from '../../src/database/dbQueries';
 import { useNetworkStore } from '../../src/store/networkStore';
 import { useAuthStore } from '../../src/store/authStore';
 import { useDeviceStore } from '../../src/store/deviceStore';
 import { BluetoothService } from '../../src/services/bluetooth/BluetoothService';
+import { LoraPacketParser } from '../../src/services/lora/LoraPacketParser';
+import { useNotificationStore } from '../../src/store/notificationStore';
 import { Colors, Spacing } from '../../src/utils/responsive';
 import { useLanguageStore } from '../../src/i18n';
 import { ErrorBoundary } from '../../src/components/ErrorBoundary';
@@ -27,19 +34,172 @@ export default function ChatScreen() {
   const isOnline = useNetworkStore((s) => s.isOnline);
   const currentUser = useAuthStore((s) => s.user);
 
+  const btDeviceName = BluetoothService.getInstance().getConnectedDeviceName();
+  const connectedNodeName =
+    currentUser?.name || (btDeviceName && btDeviceName !== 'ESP32 Gateway' ? btDeviceName : 'User');
   const devices = useDeviceStore((s) => Object.values(s.devices));
-  const [selectedDevice, setSelectedDevice] = useState<string>('dev2');
+  
+  // Filter out connected self node and generic 'User' placeholder entries
+  const peerDevices = devices.filter((d) => {
+    const name = d.userName || d.deviceName || d.deviceId;
+    if (!name || name === 'User' || name === 'ESP32 Gateway') return false;
+    return d.deviceId !== connectedNodeName && d.deviceName !== connectedNodeName && d.userName !== connectedNodeName;
+  });
+
+  const [chatTab, setChatTab] = useState<'public' | 'private'>('public');
+  const [selectedDevice, setSelectedDevice] = useState<string>('');
   const [inputText, setInputText] = useState('');
+  
+  const [publicMessages, setPublicMessages] = useState<ChatMessage[]>([]);
   const [messagesByDevice, setMessagesByDevice] = useState<Record<string, ChatMessage[]>>({});
+
+  // Load historical public & private messages from local SQLite database on mount
+  useEffect(() => {
+    async function loadHistory() {
+      try {
+        const publicHistory = await getPublicMessagesLocally();
+        if (publicHistory && publicHistory.length > 0) {
+          const formatted: ChatMessage[] = publicHistory.map((m: any) => ({
+            id: m.client_msg_id || `db_${m.id}`,
+            senderName: m.sender_name === connectedNodeName ? `${connectedNodeName} (You)` : m.sender_name,
+            message: m.message,
+            timestamp: m.created_at ? new Date(m.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '12:00',
+            isSelf: m.sender_name === connectedNodeName || (m.sender_name && m.sender_name.includes('(You)')),
+            synced: !!m.synced_at
+          }));
+          setPublicMessages(formatted);
+        }
+
+        const privateHistory = await getPrivateMessagesLocally();
+        if (privateHistory && privateHistory.length > 0) {
+          const pMap: Record<string, ChatMessage[]> = {};
+          privateHistory.forEach((m: any) => {
+            const isSelf = m.sender_name === connectedNodeName || (m.sender_name && m.sender_name.includes('(You)'));
+            const key = isSelf ? (m.receiver_id ? String(m.receiver_id) : 'Peer') : m.sender_name;
+            const formatted: ChatMessage = {
+              id: m.client_msg_id || `db_p_${m.id}`,
+              senderName: isSelf ? `${connectedNodeName} (You)` : m.sender_name,
+              message: m.message,
+              timestamp: m.created_at ? new Date(m.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '12:00',
+              isSelf,
+              synced: !!m.synced_at
+            };
+            pMap[key] = [...(pMap[key] || []), formatted];
+          });
+          setMessagesByDevice((prev) => ({ ...pMap, ...prev }));
+        }
+      } catch (err) {
+        console.warn('[ChatScreen] History load error:', err);
+      }
+    }
+    loadHistory();
+  }, [connectedNodeName]);
+
+  // Auto select first valid peer device if none selected or selected is invalid/self
+  useEffect(() => {
+    if ((!selectedDevice || selectedDevice === 'User' || selectedDevice === connectedNodeName) && peerDevices.length > 0) {
+      setSelectedDevice(peerDevices[0].deviceId);
+    }
+  }, [peerDevices, selectedDevice, connectedNodeName]);
+
+  // Use ref for selectedDevice to avoid listener re-subscription churn
+  const selectedDeviceRef = React.useRef(selectedDevice);
+  useEffect(() => {
+    selectedDeviceRef.current = selectedDevice;
+  }, [selectedDevice]);
+
+  // Real-time incoming packet listener for live Bluetooth/LoRa chat messages
+  useEffect(() => {
+    const unsubscribe = BluetoothService.getInstance().onDataReceived((rawPacket) => {
+      const parsed = LoraPacketParser.parse(rawPacket);
+      if (!parsed) return;
+
+      const selfName = useAuthStore.getState().user?.name || BluetoothService.getInstance().getConnectedDeviceName() || 'User';
+      const isGenericSelf = !selfName || selfName === 'User' || selfName === 'ESP32 Gateway';
+
+      // Ignore local ESP32 echo of messages sent by self UNLESS it is a self-directed loopback test
+      if (parsed.type === 'PUBLIC' || parsed.type === 'CHAT') {
+        if (parsed.senderId === selfName && !isGenericSelf) {
+          if (parsed.type === 'CHAT' && parsed.receiverId === selfName) {
+            // Allow loopback test
+          } else {
+            return;
+          }
+        }
+      }
+
+      const now = new Date();
+      const timeStr = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+      const msgId = `rx_${Date.now()}_${Math.random().toString(36).substr(2, 4)}`;
+
+      if (parsed.type === 'PUBLIC') {
+        const rxMsg: ChatMessage = {
+          id: msgId,
+          senderName: parsed.senderId,
+          message: parsed.message,
+          timestamp: timeStr,
+          isSelf: false,
+          synced: true
+        };
+        setPublicMessages((prev) => [...prev, rxMsg]);
+        useNotificationStore.getState().addNotification('team', `📢 Message from ${parsed.senderId}`, parsed.message);
+        // Persist incoming public message to SQLite
+        savePublicMessageLocally(1, 0, parsed.senderId, parsed.message, msgId, true).catch(console.warn);
+      } else if (parsed.type === 'CHAT') {
+        const rxMsg: ChatMessage = {
+          id: msgId,
+          senderName: parsed.senderId,
+          message: parsed.message,
+          timestamp: timeStr,
+          isSelf: false,
+          synced: true
+        };
+        const sender = parsed.senderId;
+
+        // Auto-register sender in deviceStore so peer pill appears in UI immediately
+        useDeviceStore.getState().updateDeviceLocation(sender, 13.0827, 80.2707, timeStr, 100, sender, sender);
+
+        const allDevs = Object.values(useDeviceStore.getState().devices);
+        const matchingDev = allDevs.find((d) => d.userName === sender || d.deviceName === sender || d.deviceId === sender);
+        const recipientKey = matchingDev?.deviceId || sender;
+
+        setMessagesByDevice((prev) => {
+          const nextState = {
+            ...prev,
+            [sender]: [...(prev[sender] || []), rxMsg],
+            [recipientKey]: [...(prev[recipientKey] || []), rxMsg]
+          };
+          return nextState;
+        });
+
+        useNotificationStore.getState().addNotification('chat', `💬 Private Message from ${sender}`, parsed.message);
+        setSelectedDevice(recipientKey);
+
+        // Persist incoming private message to SQLite
+        savePrivateMessageLocally(0, currentUser?.id || 1, sender, parsed.message, msgId, true).catch(console.warn);
+      }
+    });
+
+    return () => unsubscribe();
+  }, []);
 
   const handleSend = async () => {
     if (!inputText || !inputText.trim()) return;
+
+    if (!BluetoothService.getInstance().isConnected()) {
+      Alert.alert(
+        '🔌 Bluetooth Gateway Required',
+        'Please connect your Bluetooth Gateway (ESP32 or Heltec LoRa) to send messages over LoRa radio mesh.'
+      );
+      return;
+    }
 
     try {
       const now = new Date();
       const timeStr = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
       const clientMsgId = `msg_${Date.now()}`;
-      const senderDisplayName = `${currentUser?.name || 'Arun'} (You)`;
+      const selfName = currentUser?.name || BluetoothService.getInstance().getConnectedDeviceName() || 'User';
+      const senderDisplayName = `${selfName} (You)`;
 
       const newMsg: ChatMessage = {
         id: clientMsgId,
@@ -50,15 +210,46 @@ export default function ChatScreen() {
         synced: isOnline
       };
 
-      setMessagesByDevice((prev) => ({
-        ...prev,
-        [selectedDevice]: [...(prev[selectedDevice] || []), newMsg]
-      }));
+      if (chatTab === 'public') {
+        // 1. Instant UI update
+        setPublicMessages((prev) => [...prev, newMsg]);
+        // 2. Instant Bluetooth Radio Packet Dispatch (Zero-latency)
+        const rawPublicPacket = `MSG,COMMON,${selfName},ALL,${newMsg.message}`;
+        BluetoothService.getInstance().sendData(rawPublicPacket);
+        // 3. Background SQLite Storage
+        savePublicMessageLocally(1, currentUser?.id || 1, selfName, newMsg.message, clientMsgId, isOnline).catch(console.warn);
+      } else {
+        const targetRecipient = selectedDevice.trim();
+        if (!targetRecipient) {
+          Alert.alert('Recipient Required', 'Please enter or select a recipient Call Sign (e.g. THANU or JESS) to send a private message.');
+          return;
+        }
 
-      await savePrivateMessageLocally(currentUser?.id || 1, 2, currentUser?.name || 'Arun', newMsg.message, clientMsgId, isOnline);
+        const targetDev = devices.find((d) => d.deviceId === targetRecipient || d.userName === targetRecipient || d.deviceName === targetRecipient);
+        const recipientKey = targetRecipient;
 
-      const rawChatPacket = `CHAT,${currentUser?.name || 'Arun'},${selectedDevice},${newMsg.message}`;
-      BluetoothService.getInstance().sendData(rawChatPacket);
+        // Auto-register recipient in deviceStore if not already present
+        useDeviceStore.getState().updateDeviceLocation(recipientKey, 13.0827, 80.2707, timeStr, 100, recipientKey, recipientKey);
+
+        // 1. Instant UI update for sender
+        setMessagesByDevice((prev) => {
+          const nextState = {
+            ...prev,
+            [recipientKey]: [...(prev[recipientKey] || []), newMsg]
+          };
+          if (targetDev?.userName && targetDev.userName !== recipientKey) {
+            nextState[targetDev.userName] = [...(prev[targetDev.userName] || []), newMsg];
+          }
+          return nextState;
+        });
+
+        // 2. Instant Bluetooth Radio Packet Dispatch (Zero-latency)
+        const rawChatPacket = `MSG,PRIVATE,${selfName},${targetRecipient},${newMsg.message}`;
+        BluetoothService.getInstance().sendData(rawChatPacket);
+
+        // 3. Background SQLite Storage
+        savePrivateMessageLocally(currentUser?.id || 1, 2, selfName, newMsg.message, clientMsgId, isOnline).catch(console.warn);
+      }
 
       setInputText('');
     } catch (err: any) {
@@ -67,8 +258,8 @@ export default function ChatScreen() {
     }
   };
 
-  const currentMessages = messagesByDevice[selectedDevice] || [];
-  const activeTargetDev = devices.find((d) => d.deviceId === selectedDevice);
+  const currentMessages = chatTab === 'public' ? publicMessages : (messagesByDevice[selectedDevice] || []);
+  const activeTargetDev = devices.find((d) => d.deviceId === selectedDevice || d.userName === selectedDevice);
 
   return (
     <ErrorBoundary fallbackTitle="Chat Screen Error">
@@ -77,38 +268,76 @@ export default function ChatScreen() {
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       >
         <View style={styles.responsiveWrapper}>
-          {/* BioSync Teammate / Device Selector Bar */}
-          <View style={styles.deviceSelectorContainer}>
-            <Text style={styles.selectorLabel}>🔒 {t('private_messages')} - {t('assigned_user')}:</Text>
-            <FlatList
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              data={devices}
-              keyExtractor={(item) => item.deviceId}
-              contentContainerStyle={styles.devicePillList}
-              renderItem={({ item }) => {
-                const isSelected = selectedDevice === item.deviceId;
-                return (
-                  <TouchableOpacity
-                    style={[styles.devicePill, isSelected && styles.devicePillActive]}
-                    onPress={() => setSelectedDevice(item.deviceId)}
-                  >
-                    <Text style={[styles.devicePillText, isSelected && styles.devicePillTextActive]}>
-                      🟢 {item.userName || item.deviceId} ({item.deviceId})
-                    </Text>
-                  </TouchableOpacity>
-                );
-              }}
-            />
+          {/* Chat Mode Switcher Header: Public Broadcast vs Private Messages */}
+          <View style={styles.tabToggleRow}>
+            <TouchableOpacity
+              style={[styles.tabToggleBtn, chatTab === 'public' && styles.tabToggleBtnActive]}
+              onPress={() => setChatTab('public')}
+            >
+              <Text style={[styles.tabToggleText, chatTab === 'public' && styles.tabToggleTextActive]}>
+                📢 Public Team Channel
+              </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[styles.tabToggleBtn, chatTab === 'private' && styles.tabToggleBtnActive]}
+              onPress={() => setChatTab('private')}
+            >
+              <Text style={[styles.tabToggleText, chatTab === 'private' && styles.tabToggleTextActive]}>
+                🔒 Private Message
+              </Text>
+            </TouchableOpacity>
           </View>
 
-          {/* Active Private Chat Peer Banner */}
-          <View style={styles.peerBanner}>
-            <Text style={styles.peerBannerTitle}>
-              {t('person')}: <Text style={styles.peerHighlight}>{activeTargetDev?.userName || selectedDevice}</Text>
-            </Text>
-            <Text style={styles.peerBannerSub}>📡 {t('bluetooth_connected')}</Text>
-          </View>
+          {/* Teammate Device Selector Bar (Private Mode Only) */}
+          {chatTab === 'private' ? (
+            <View style={styles.deviceSelectorContainer}>
+              <Text style={styles.selectorLabel}>👤 Select Teammate to Message:</Text>
+              {peerDevices.length > 0 ? (
+                <FlatList
+                  horizontal
+                  showsHorizontalScrollIndicator={false}
+                  data={peerDevices}
+                  keyExtractor={(item) => item.deviceId}
+                  contentContainerStyle={styles.devicePillList}
+                  renderItem={({ item }) => {
+                    const isSelected = selectedDevice === item.deviceId || selectedDevice === item.userName;
+                    return (
+                      <TouchableOpacity
+                        style={[styles.devicePill, isSelected && styles.devicePillActive]}
+                        onPress={() => setSelectedDevice(item.userName || item.deviceId)}
+                      >
+                        <Text style={[styles.devicePillText, isSelected && styles.devicePillTextActive]}>
+                          🟢 {item.userName || item.deviceId}
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  }}
+                />
+              ) : (
+                <Text style={{ color: Colors.textMuted, fontSize: 12, paddingVertical: 6 }}>
+                  No other teammates connected nearby yet.
+                </Text>
+              )}
+            </View>
+          ) : (
+            <View style={styles.peerBanner}>
+              <Text style={styles.peerBannerTitle}>
+                Broadcast Channel: <Text style={styles.peerHighlight}>Team 1 Public Mesh</Text>
+              </Text>
+              <Text style={styles.peerBannerSub}>🌐 Broadcasts to all connected field nodes</Text>
+            </View>
+          )}
+
+          {/* Active Private Chat Peer Banner (Private Mode Only) */}
+          {chatTab === 'private' && selectedDevice && selectedDevice !== 'User' && (
+            <View style={styles.peerBanner}>
+              <Text style={styles.peerBannerTitle}>
+                🔒 Direct Message: <Text style={styles.peerHighlight}>{activeTargetDev?.userName || activeTargetDev?.deviceName || selectedDevice}</Text>
+              </Text>
+              <Text style={styles.peerBannerSub}>📡 {t('bluetooth_connected')}</Text>
+            </View>
+          )}
 
           {/* Messages List */}
           <FlatList
@@ -122,7 +351,7 @@ export default function ChatScreen() {
           <View style={[styles.inputRow, { paddingBottom: insets.bottom + Spacing.sm }]}>
             <TextInput
               style={styles.textInput}
-              placeholder={`${t('type_message')}`}
+              placeholder={chatTab === 'public' ? 'Broadcast message to entire team...' : `${t('type_message')}`}
               placeholderTextColor={Colors.textMuted}
               value={inputText}
               onChangeText={setInputText}
@@ -147,6 +376,39 @@ const styles = StyleSheet.create({
     width: '100%',
     maxWidth: 900,
     alignSelf: 'center'
+  },
+  tabToggleRow: {
+    flexDirection: 'row',
+    padding: Spacing.sm,
+    backgroundColor: Colors.card,
+    borderBottomWidth: 1,
+    borderColor: Colors.cardBorder,
+    gap: Spacing.sm
+  },
+  tabToggleBtn: {
+    flex: 1,
+    paddingVertical: Spacing.sm,
+    borderRadius: 20,
+    backgroundColor: '#F4F5F7',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: Colors.cardBorder
+  },
+  tabToggleBtnActive: {
+    backgroundColor: '#18181B',
+    borderColor: '#18181B'
+  },
+  tabToggleText: {
+    color: Colors.textMuted,
+    fontSize: 12,
+    fontWeight: '700',
+    fontFamily: 'OpenSans_700Bold'
+  },
+  tabToggleTextActive: {
+    color: '#FFFFFF',
+    fontWeight: 'bold',
+    fontFamily: 'OpenSans_700Bold'
   },
   deviceSelectorContainer: {
     paddingTop: Spacing.md,

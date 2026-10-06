@@ -43,9 +43,8 @@ export const en = {
   public_team_chat: 'Public Team Chat',
   private_messages: 'Private Messages',
   type_message: 'Type a message...',
-  send: 'Send',
-  waiting_connection: 'Waiting for connection...',
-  synced: 'Synced',
+  waiting_connection: 'BLE Mesh Sent • ⏳ Cloud Pending',
+  synced: 'BLE Mesh Sent • ✓ Cloud Synced',
 
   // Offline Maps Screen
   india_offline_map_directory: 'India Micro-Region Offline Map Directory',

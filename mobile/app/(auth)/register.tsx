@@ -79,7 +79,7 @@ export default function RegisterScreen() {
             style={styles.input}
             value={name}
             onChangeText={setName}
-            placeholder="e.g. Arun Kumar"
+            placeholder="e.g. Field User"
             placeholderTextColor={Colors.textMuted}
           />
 

@@ -30,8 +30,8 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({ msg }) => {
             {msg.timestamp}
           </Text>
           {msg.isSelf && (
-            <Text style={styles.statusText}>
-              {msg.synced ? ` ✓ ${t('synced')}` : ` ⏳ ${t('waiting_connection')}`}
+            <Text style={msg.synced ? styles.statusSynced : styles.statusMeshSent}>
+              {msg.synced ? ` 📡 ${t('synced')}` : ` 📡 Radio Mesh Sent`}
             </Text>
           )}
         </View>
@@ -102,8 +102,13 @@ const styles = StyleSheet.create({
   peerTimestamp: {
     color: '#71717A'
   },
-  statusText: {
-    color: Colors.accent,
+  statusSynced: {
+    color: '#4ADE80',
+    fontSize: 10,
+    fontWeight: '600'
+  },
+  statusMeshSent: {
+    color: '#60A5FA',
     fontSize: 10,
     fontWeight: '600'
   }

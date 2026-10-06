@@ -12,7 +12,12 @@ export default function TeamScreen() {
   const router = useRouter();
   const t = useLanguageStore((s) => s.t);
 
-  const devices = useDeviceStore((s) => Object.values(s.devices));
+  const devices = useDeviceStore((s) =>
+    Object.values(s.devices).filter((d) => {
+      const name = d.userName || d.deviceName || d.deviceId;
+      return name !== 'User' && name !== 'ESP32 Gateway' && d.deviceId !== 'User' && d.deviceId !== 'ESP32 Gateway';
+    })
+  );
   const activePeopleCount = devices.length;
 
   return (

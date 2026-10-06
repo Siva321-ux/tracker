@@ -35,26 +35,30 @@ export const useDeviceStore = create<DeviceStoreState>((set) => ({
   setDevices: (devices) => set({ devices }),
   updateDeviceLocation: (deviceId, lat, lon, time, value, deviceName, userName) =>
     set((state) => {
-      const existing = state.devices[deviceId] || {
+      const updatedDevices = { ...state.devices };
+      // Purge generic 'User' or 'ESP32 Gateway' placeholder entries if real callsign is added
+      if (deviceId !== 'User' && deviceId !== 'ESP32 Gateway') {
+        delete updatedDevices['User'];
+        delete updatedDevices['ESP32 Gateway'];
+      }
+
+      const existing = updatedDevices[deviceId] || {
         deviceId,
         deviceName: deviceName || `Device ${deviceId}`,
         userName: userName || deviceId,
         status: 'online'
       };
 
-      return {
-        devices: {
-          ...state.devices,
-          [deviceId]: {
-            ...existing,
-            latitude: lat,
-            longitude: lon,
-            lastUpdated: time,
-            batteryOrValue: value,
-            status: 'online'
-          }
-        }
+      updatedDevices[deviceId] = {
+        ...existing,
+        latitude: lat,
+        longitude: lon,
+        lastUpdated: time,
+        batteryOrValue: value,
+        status: 'online'
       };
+
+      return { devices: updatedDevices };
     }),
   setCustomDeviceName: (deviceId, newName) =>
     set((state) => {

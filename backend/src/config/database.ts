@@ -176,7 +176,12 @@ function initSqliteTables(): Promise<void> {
 export async function dbQuery<T = any>(sql: string, params: any[] = []): Promise<T[]> {
   if (!isUsingSqlite && pool) {
     const [rows] = await pool.execute(sql, params);
-    return rows as T[];
+    if (Array.isArray(rows)) {
+      return rows as T[];
+    } else {
+      const header = rows as mysql.ResultSetHeader;
+      return [{ insertId: header.insertId, affectedRows: header.affectedRows }] as any;
+    }
   } else if (sqliteDb) {
     return new Promise((resolve, reject) => {
       // Replace MySQL '?' placeholders if needed or MySQL specific syntax

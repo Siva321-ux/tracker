@@ -17,12 +17,12 @@ export const DeviceBottomSheet: React.FC<DeviceBottomSheetProps> = ({
   onOpenChat,
   onCenterMap
 }) => {
-  if (!device) return null;
-
   const t = useLanguageStore((s) => s.t);
   const setCustomDeviceName = useDeviceStore((s) => s.setCustomDeviceName);
   const [isEditing, setIsEditing] = useState(false);
-  const [editName, setEditName] = useState(device.userName || device.deviceName || device.deviceId);
+  const [editName, setEditName] = useState(device ? (device.userName || device.deviceName || device.deviceId) : '');
+
+  if (!device) return null;
 
   const handleSaveName = () => {
     if (editName.trim()) {

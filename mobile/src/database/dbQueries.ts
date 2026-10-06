@@ -119,6 +119,14 @@ export async function savePrivateMessageLocally(
   return result[0]?.insertId;
 }
 
+export async function getPublicMessagesLocally() {
+  return await executeMobileQuery('SELECT * FROM public_messages ORDER BY id ASC');
+}
+
+export async function getPrivateMessagesLocally() {
+  return await executeMobileQuery('SELECT * FROM private_messages ORDER BY id ASC');
+}
+
 export async function getLocalOfflineRegions() {
   return await executeMobileQuery('SELECT * FROM offline_regions ORDER BY created_at DESC');
 }

@@ -14,7 +14,7 @@ export default function SettingsScreen() {
   const { language, setLanguage, t } = useLanguageStore();
   const { user, updateUserName } = useAuthStore();
 
-  const [editName, setEditName] = useState(user?.name || 'Arun Kumar');
+  const [editName, setEditName] = useState(user?.name || 'Field User');
   const [isEditing, setIsEditing] = useState(false);
   const [isSimulating, setIsSimulating] = useState(LoraSimulator.getInstance().isSimulating());
   const [isBtConnected, setIsBtConnected] = useState(BluetoothService.getInstance().isConnected());
