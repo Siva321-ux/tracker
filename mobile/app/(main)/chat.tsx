@@ -28,22 +28,28 @@ import { Colors, Spacing } from '../../src/utils/responsive';
 import { useLanguageStore } from '../../src/i18n';
 import { ErrorBoundary } from '../../src/components/ErrorBoundary';
 
+import { getLocalNodeIdAsync, getLocalNodeIdSync } from '../../src/utils/nodeIdentity';
+
 export default function ChatScreen() {
   const insets = useSafeAreaInsets();
   const t = useLanguageStore((s) => s.t);
   const isOnline = useNetworkStore((s) => s.isOnline);
   const currentUser = useAuthStore((s) => s.user);
 
-  const btDeviceName = BluetoothService.getInstance().getConnectedDeviceName();
-  const connectedNodeName =
-    currentUser?.name || (btDeviceName && btDeviceName !== 'ESP32 Gateway' ? btDeviceName : 'User');
+  const [connectedNodeName, setConnectedNodeName] = useState<string>(getLocalNodeIdSync());
+
+  useEffect(() => {
+    getLocalNodeIdAsync().then((id) => setConnectedNodeName(id));
+  }, [currentUser]);
+
   const devices = useDeviceStore((s) => Object.values(s.devices));
   
-  // Filter out connected self node and generic 'User' placeholder entries
+  // Filter out connected self node, auth user name, and generic 'User' placeholder entries
   const peerDevices = devices.filter((d) => {
     const name = d.userName || d.deviceName || d.deviceId;
-    if (!name || name === 'User' || name === 'ESP32 Gateway') return false;
-    return d.deviceId !== connectedNodeName && d.deviceName !== connectedNodeName && d.userName !== connectedNodeName;
+    if (!name || name === 'User' || name === 'ESP32 Gateway' || name === 'Mobile Node') return false;
+    const isSelfId = d.deviceId === connectedNodeName || d.userName === connectedNodeName || d.deviceName === connectedNodeName;
+    return !isSelfId;
   });
 
   const [chatTab, setChatTab] = useState<'public' | 'private'>('public');
@@ -57,14 +63,15 @@ export default function ChatScreen() {
   useEffect(() => {
     async function loadHistory() {
       try {
+        const myId = await getLocalNodeIdAsync();
         const publicHistory = await getPublicMessagesLocally();
         if (publicHistory && publicHistory.length > 0) {
           const formatted: ChatMessage[] = publicHistory.map((m: any) => ({
             id: m.client_msg_id || `db_${m.id}`,
-            senderName: m.sender_name === connectedNodeName ? `${connectedNodeName} (You)` : m.sender_name,
+            senderName: m.sender_name === myId ? `${myId} (You)` : m.sender_name,
             message: m.message,
             timestamp: m.created_at ? new Date(m.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '12:00',
-            isSelf: m.sender_name === connectedNodeName || (m.sender_name && m.sender_name.includes('(You)')),
+            isSelf: m.sender_name === myId || (m.sender_name && m.sender_name.includes('(You)')),
             synced: !!m.synced_at
           }));
           setPublicMessages(formatted);
@@ -74,11 +81,11 @@ export default function ChatScreen() {
         if (privateHistory && privateHistory.length > 0) {
           const pMap: Record<string, ChatMessage[]> = {};
           privateHistory.forEach((m: any) => {
-            const isSelf = m.sender_name === connectedNodeName || (m.sender_name && m.sender_name.includes('(You)'));
+            const isSelf = m.sender_name === myId || (m.sender_name && m.sender_name.includes('(You)'));
             const key = isSelf ? (m.receiver_id ? String(m.receiver_id) : 'Peer') : m.sender_name;
             const formatted: ChatMessage = {
               id: m.client_msg_id || `db_p_${m.id}`,
-              senderName: isSelf ? `${connectedNodeName} (You)` : m.sender_name,
+              senderName: isSelf ? `${myId} (You)` : m.sender_name,
               message: m.message,
               timestamp: m.created_at ? new Date(m.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '12:00',
               isSelf,
@@ -102,37 +109,22 @@ export default function ChatScreen() {
     }
   }, [peerDevices, selectedDevice, connectedNodeName]);
 
-  // Use ref for selectedDevice to avoid listener re-subscription churn
-  const selectedDeviceRef = React.useRef(selectedDevice);
-  useEffect(() => {
-    selectedDeviceRef.current = selectedDevice;
-  }, [selectedDevice]);
-
   // Real-time incoming packet listener for live Bluetooth/LoRa chat messages
   useEffect(() => {
     const unsubscribe = BluetoothService.getInstance().onDataReceived((rawPacket) => {
       const parsed = LoraPacketParser.parse(rawPacket);
       if (!parsed) return;
 
-      const selfName = useAuthStore.getState().user?.name || BluetoothService.getInstance().getConnectedDeviceName() || 'User';
-      const isGenericSelf = !selfName || selfName === 'User' || selfName === 'ESP32 Gateway';
-
-      // Ignore local ESP32 echo of messages sent by self UNLESS it is a self-directed loopback test
-      if (parsed.type === 'PUBLIC' || parsed.type === 'CHAT') {
-        if (parsed.senderId === selfName && !isGenericSelf) {
-          if (parsed.type === 'CHAT' && parsed.receiverId === selfName) {
-            // Allow loopback test
-          } else {
-            return;
-          }
-        }
-      }
+      const selfName = getLocalNodeIdSync();
 
       const now = new Date();
       const timeStr = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
       const msgId = `rx_${Date.now()}_${Math.random().toString(36).substr(2, 4)}`;
 
       if (parsed.type === 'PUBLIC') {
+        // Drop local echo
+        if (parsed.senderId === selfName) return;
+
         const rxMsg: ChatMessage = {
           id: msgId,
           senderName: parsed.senderId,
@@ -142,10 +134,17 @@ export default function ChatScreen() {
           synced: true
         };
         setPublicMessages((prev) => [...prev, rxMsg]);
+        useDeviceStore.getState().registerDevice(parsed.senderId, parsed.senderId, parsed.senderId);
         useNotificationStore.getState().addNotification('team', `📢 Message from ${parsed.senderId}`, parsed.message);
-        // Persist incoming public message to SQLite
         savePublicMessageLocally(1, 0, parsed.senderId, parsed.message, msgId, true).catch(console.warn);
       } else if (parsed.type === 'CHAT') {
+        // Drop local echo
+        if (parsed.senderId === selfName) return;
+
+        // Accept if directed to self, to ALL, or unspecified
+        const isForMe = !parsed.receiverId || parsed.receiverId === selfName || parsed.receiverId === 'ALL' || parsed.receiverId === 'User' || parsed.receiverId.toLowerCase() === selfName.toLowerCase();
+        if (!isForMe) return;
+
         const rxMsg: ChatMessage = {
           id: msgId,
           senderName: parsed.senderId,
@@ -157,25 +156,16 @@ export default function ChatScreen() {
         const sender = parsed.senderId;
 
         // Auto-register sender in deviceStore so peer pill appears in UI immediately
-        useDeviceStore.getState().updateDeviceLocation(sender, 13.0827, 80.2707, timeStr, 100, sender, sender);
+        useDeviceStore.getState().registerDevice(sender, sender, sender);
 
-        const allDevs = Object.values(useDeviceStore.getState().devices);
-        const matchingDev = allDevs.find((d) => d.userName === sender || d.deviceName === sender || d.deviceId === sender);
-        const recipientKey = matchingDev?.deviceId || sender;
-
-        setMessagesByDevice((prev) => {
-          const nextState = {
-            ...prev,
-            [sender]: [...(prev[sender] || []), rxMsg],
-            [recipientKey]: [...(prev[recipientKey] || []), rxMsg]
-          };
-          return nextState;
-        });
+        setMessagesByDevice((prev) => ({
+          ...prev,
+          [sender]: [...(prev[sender] || []), rxMsg]
+        }));
 
         useNotificationStore.getState().addNotification('chat', `💬 Private Message from ${sender}`, parsed.message);
-        setSelectedDevice(recipientKey);
+        setSelectedDevice(sender);
 
-        // Persist incoming private message to SQLite
         savePrivateMessageLocally(0, currentUser?.id || 1, sender, parsed.message, msgId, true).catch(console.warn);
       }
     });
@@ -198,7 +188,7 @@ export default function ChatScreen() {
       const now = new Date();
       const timeStr = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
       const clientMsgId = `msg_${Date.now()}`;
-      const selfName = currentUser?.name || BluetoothService.getInstance().getConnectedDeviceName() || 'User';
+      const selfName = await getLocalNodeIdAsync();
       const senderDisplayName = `${selfName} (You)`;
 
       const newMsg: ChatMessage = {
@@ -235,23 +225,14 @@ export default function ChatScreen() {
           return;
         }
 
-        const targetDev = devices.find((d) => d.deviceId === targetRecipient || d.userName === targetRecipient || d.deviceName === targetRecipient);
         const recipientKey = targetRecipient;
-
-        // Auto-register recipient in deviceStore if not already present
-        useDeviceStore.getState().updateDeviceLocation(recipientKey, 13.0827, 80.2707, timeStr, 100, recipientKey, recipientKey);
+        useDeviceStore.getState().registerDevice(recipientKey, recipientKey, recipientKey);
 
         // 1. Instant UI update for sender
-        setMessagesByDevice((prev) => {
-          const nextState = {
-            ...prev,
-            [recipientKey]: [...(prev[recipientKey] || []), newMsg]
-          };
-          if (targetDev?.userName && targetDev.userName !== recipientKey) {
-            nextState[targetDev.userName] = [...(prev[targetDev.userName] || []), newMsg];
-          }
-          return nextState;
-        });
+        setMessagesByDevice((prev) => ({
+          ...prev,
+          [recipientKey]: [...(prev[recipientKey] || []), newMsg]
+        }));
 
         // 2. Instant Bluetooth Radio Packet Dispatch (Base64 encoded for Web & LoRa mesh compatibility)
         const rawChatPacket = `MSG,PRIVATE,${selfName},${targetRecipient},${encodeBase64(newMsg.message)}`;

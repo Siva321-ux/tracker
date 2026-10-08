@@ -1,18 +1,26 @@
-import { Platform } from 'react-native';
+let Platform: any = { OS: 'web' };
+try {
+  Platform = require('react-native').Platform || Platform;
+} catch (e) {
+  Platform = { OS: 'web' };
+}
 import * as Location from 'expo-location';
 import * as Battery from 'expo-battery';
 import { BluetoothService } from '../bluetooth/BluetoothService';
 import { useDeviceStore } from '../../store/deviceStore';
 import { useAuthStore } from '../../store/authStore';
 import { saveLocationLocally } from '../../database/dbQueries';
+import { getLocalNodeIdAsync, getLocalNodeIdSync } from '../../utils/nodeIdentity';
 
 export class LocationTrackerService {
   private static instance: LocationTrackerService;
   private trackingInterval: any = null;
-  private currentLat: number = 13.0827; // Default Chennai base coords
-  private currentLon: number = 80.2707;
+  private currentLat: number = 11.5034; // Sathy/Tamil Nadu field base coords
+  private currentLon: number = 77.2444;
+  private currentBattery: number = 95;
   private isTracking: boolean = false;
   private locationSubscription: any = null;
+  private hasAcquiredRealGps: boolean = false;
 
   private constructor() {}
 
@@ -26,21 +34,42 @@ export class LocationTrackerService {
   /**
    * Starts periodic GPS location tracking & automatic Bluetooth LOC broadcasting
    */
-  public async startTracking(intervalMs: number = 10000): Promise<void> {
-    if (this.isTracking) return;
+  public async startTracking(intervalMs: number = 5000): Promise<void> {
+    if (this.isTracking) {
+      this.broadcastLocationPacket().catch(() => {});
+      return;
+    }
     this.isTracking = true;
 
-    console.log('[LocationTrackerService] Starting automatic GPS & Bluetooth telemetry broadcasting...');
+    console.log('[LocationTrackerService] Starting automatic GPS & Bluetooth telemetry tracking...');
 
-    // Request native Expo Location permissions
     await this.requestLocationPermissions();
-
-    // 1. Fetch initial position
     await this.acquireCurrentPosition();
+    await this.broadcastLocationPacket();
 
-    // 2. Set up periodic location update & Bluetooth broadcast loop
+    // Start native location position stream if available
+    try {
+      if (Location && Location.watchPositionAsync) {
+        this.locationSubscription = await Location.watchPositionAsync(
+          {
+            accuracy: Location.Accuracy.High,
+            timeInterval: 4000,
+            distanceInterval: 2
+          },
+          (pos) => {
+            if (pos && pos.coords) {
+              this.currentLat = pos.coords.latitude;
+              this.currentLon = pos.coords.longitude;
+              this.hasAcquiredRealGps = true;
+            }
+          }
+        );
+      }
+    } catch (e: any) {
+      console.warn('[LocationTrackerService] Location watcher notice:', e?.message);
+    }
+
     this.trackingInterval = setInterval(async () => {
-      await this.acquireCurrentPosition();
       await this.broadcastLocationPacket();
     }, intervalMs);
   }
@@ -51,7 +80,9 @@ export class LocationTrackerService {
       this.trackingInterval = null;
     }
     if (this.locationSubscription && this.locationSubscription.remove) {
-      this.locationSubscription.remove();
+      try {
+        this.locationSubscription.remove();
+      } catch (_) {}
       this.locationSubscription = null;
     }
     this.isTracking = false;
@@ -75,46 +106,62 @@ export class LocationTrackerService {
    * Acquires live hardware GPS coordinates from Expo Location or Browser Geolocation API
    */
   public async acquireCurrentPosition(): Promise<{ latitude: number; longitude: number }> {
-    // 1. Try Expo Location native GPS chip
     try {
       if (Location) {
-        // Try fast last known position first
+        // First check last known position for immediate accuracy
         if (Location.getLastKnownPositionAsync) {
-          const lastPos = await Location.getLastKnownPositionAsync();
-          if (lastPos && lastPos.coords) {
-            this.currentLat = lastPos.coords.latitude;
-            this.currentLon = lastPos.coords.longitude;
-          }
+          try {
+            const lastPos = await Location.getLastKnownPositionAsync();
+            if (lastPos && lastPos.coords) {
+              this.currentLat = lastPos.coords.latitude;
+              this.currentLon = lastPos.coords.longitude;
+              this.hasAcquiredRealGps = true;
+            }
+          } catch (_) {}
         }
-        // Then query high-accuracy current position
+
+        // Fetch precise current GPS fix with generous 8s timeout
         if (Location.getCurrentPositionAsync) {
-          const pos = await Location.getCurrentPositionAsync({
-            accuracy: Location.Accuracy?.Balanced || 3,
-          });
-          if (pos && pos.coords) {
-            this.currentLat = pos.coords.latitude;
-            this.currentLon = pos.coords.longitude;
-            console.log(`[LocationTrackerService] Live Native GPS: Lat=${this.currentLat}, Lon=${this.currentLon}`);
+          try {
+            const posPromise = Location.getCurrentPositionAsync({
+              accuracy: Location.Accuracy?.High || Location.Accuracy?.Balanced || 3,
+            });
+            const timeoutPromise = new Promise<null>((r) => setTimeout(() => r(null), 8000));
+            const pos: any = await Promise.race([posPromise, timeoutPromise]);
+            if (pos && pos.coords) {
+              this.currentLat = pos.coords.latitude;
+              this.currentLon = pos.coords.longitude;
+              this.hasAcquiredRealGps = true;
+              console.log(`[LocationTrackerService] Live Native GPS: Lat=${this.currentLat}, Lon=${this.currentLon}`);
+              return { latitude: this.currentLat, longitude: this.currentLon };
+            }
+          } catch (e: any) {
+            console.warn('[LocationTrackerService] Position fetch warning:', e?.message);
           }
         }
-        return { latitude: this.currentLat, longitude: this.currentLon };
       }
     } catch (err: any) {
       console.warn('[LocationTrackerService] Expo native location fetch notice:', err?.message);
     }
 
-    // 2. Fallback to Web Geolocation API
+    // Fallback to Web Geolocation API
     if (typeof navigator !== 'undefined' && navigator.geolocation) {
-      navigator.geolocation.getCurrentPosition(
-        (pos) => {
-          this.currentLat = pos.coords.latitude;
-          this.currentLon = pos.coords.longitude;
-        },
-        (err) => {
-          console.warn('[LocationTrackerService] Web Geolocation fetch notice:', err.message);
-        },
-        { enableHighAccuracy: true, timeout: 5000, maximumAge: 10000 }
-      );
+      await new Promise<void>((resolve) => {
+        navigator.geolocation.getCurrentPosition(
+          (pos) => {
+            if (pos && pos.coords) {
+              this.currentLat = pos.coords.latitude;
+              this.currentLon = pos.coords.longitude;
+              this.hasAcquiredRealGps = true;
+            }
+            resolve();
+          },
+          (err) => {
+            resolve();
+          },
+          { enableHighAccuracy: true, timeout: 6000, maximumAge: 5000 }
+        );
+      });
     }
 
     return { latitude: this.currentLat, longitude: this.currentLon };
@@ -123,14 +170,14 @@ export class LocationTrackerService {
   /**
    * Acquires real hardware battery percentage from device API (Expo Battery / Web Battery)
    */
-  private async acquireBatteryLevel(): Promise<number> {
+  public async acquireBatteryLevel(): Promise<number> {
     try {
       if (Battery && Battery.getBatteryLevelAsync) {
         const level = await Battery.getBatteryLevelAsync();
         if (typeof level === 'number' && level >= 0) {
           const pct = Math.round(level * 100);
-          console.log(`[LocationTrackerService] Native Mobile Battery Level: ${pct}%`);
-          return pct;
+          this.currentBattery = Math.max(1, Math.min(100, pct));
+          return this.currentBattery;
         }
       }
     } catch (e: any) {
@@ -141,13 +188,14 @@ export class LocationTrackerService {
       if (typeof navigator !== 'undefined' && (navigator as any).getBattery) {
         const bat = await (navigator as any).getBattery();
         if (bat && typeof bat.level === 'number') {
-          return Math.round(bat.level * 100);
+          const pct = Math.round(bat.level * 100);
+          this.currentBattery = Math.max(1, Math.min(100, pct));
+          return this.currentBattery;
         }
       }
-    } catch (e) {
-      console.warn('[LocationTrackerService] Web Battery API notice:', e);
-    }
-    return 100;
+    } catch (e) {}
+
+    return this.currentBattery || 95;
   }
 
   /**
@@ -156,22 +204,16 @@ export class LocationTrackerService {
   public async broadcastLocationPacket(): Promise<void> {
     const btService = BluetoothService.getInstance();
     const isConnected = btService.isConnected();
+    
+    // Use unique Call Sign / Node ID for this specific mobile device
+    const deviceId = await getLocalNodeIdAsync();
 
-    // If Bluetooth is NOT connected, do NOT create ghost map pins
-    if (!isConnected) {
-      console.log('[LocationTrackerService] Bluetooth disconnected. Skipping map pin update.');
-      return;
-    }
-
-    const connectedNode = btService.getConnectedDeviceName();
-    const user = useAuthStore.getState().user;
-    const deviceId = connectedNode || user?.name || 'ESP32 Gateway';
-
-    const now = new Date();
-    const timeStr = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+    await this.acquireCurrentPosition();
     const battery = await this.acquireBatteryLevel();
+    const now = new Date();
+    const timeStr = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}:${String(now.getSeconds()).padStart(2, '0')}`;
 
-    // 1. Update local deviceStore map pin & SQLite DB
+    // 1. ALWAYS update local deviceStore map pin & SQLite DB for local user display
     useDeviceStore.getState().updateDeviceLocation(
       deviceId,
       this.currentLat,
@@ -186,9 +228,12 @@ export class LocationTrackerService {
       console.error('[LocationTrackerService] Error saving location locally:', err)
     );
 
-    // 2. Broadcast over Bluetooth hardware stream
-    const locPacket = `LOC,${deviceId},${this.currentLat.toFixed(4)},${this.currentLon.toFixed(4)},${timeStr},${battery}`;
-    console.log(`[LocationTrackerService] Transmitting auto-location packet over Bluetooth: "${locPacket}"`);
-    await btService.sendData(locPacket);
+    // 2. Broadcast over Bluetooth hardware stream if connected (Matching Flutter format: LOC,ID,LAT,LON,TIME,BATT)
+    if (isConnected) {
+      const locPacket = `LOC,${deviceId},${this.currentLat.toFixed(6)},${this.currentLon.toFixed(6)},${timeStr},${battery}`;
+      console.log(`[LocationTrackerService] Transmitting auto-location packet over Bluetooth: "${locPacket}"`);
+      await btService.sendData(locPacket);
+    }
   }
 }
+

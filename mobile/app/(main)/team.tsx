@@ -1,22 +1,27 @@
-import React from 'react';
-import { View, Text, StyleSheet, FlatList, TouchableOpacity } from 'react-native';
+import React, { useState } from 'react';
+import { View, Text, StyleSheet, FlatList, TouchableOpacity, Alert } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useDeviceStore } from '../../src/store/deviceStore';
 import { Colors, Spacing } from '../../src/utils/responsive';
 import { useLanguageStore } from '../../src/i18n';
 import { ErrorBoundary } from '../../src/components/ErrorBoundary';
-
 import { useNetworkStore } from '../../src/store/networkStore';
 import { BluetoothService } from '../../src/services/bluetooth/BluetoothService';
+import { BluetoothConnectModal } from '../../src/components/BluetoothConnectModal';
+import { useAuthStore } from '../../src/store/authStore';
+import { getLocalNodeIdSync } from '../../src/utils/nodeIdentity';
 
 export default function TeamScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const t = useLanguageStore((s) => s.t);
+  const currentUser = useAuthStore((s) => s.user);
   const isLoraConnected = useNetworkStore((s) => s.isLoraConnected);
   const btService = BluetoothService.getInstance();
   const connectedBtName = btService.getConnectedDeviceName();
+  const selfId = getLocalNodeIdSync();
+  const [showBtModal, setShowBtModal] = useState(false);
 
   const devices = useDeviceStore((s) =>
     Object.values(s.devices).filter((d) => {
@@ -32,12 +37,36 @@ export default function TeamScreen() {
       {/* Responsive Centered Wrapper */}
       <View style={styles.responsiveWrapper}>
         {/* Header with Dynamic Connected People Count */}
-        <View style={styles.header}>
-          <Text style={styles.headerTitle}>👥 {t('team_response_team')}</Text>
-          <Text style={styles.headerSubtitle}>
-            {t('connected_people_count').replace('{count}', String(activePeopleCount))}
-          </Text>
+        <View style={[styles.header, { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }]}>
+          <View>
+            <Text style={styles.headerTitle}>👥 {t('team_response_team')}</Text>
+            <Text style={styles.headerSubtitle}>
+              {t('connected_people_count').replace('{count}', String(activePeopleCount))}
+            </Text>
+          </View>
+
+          {isLoraConnected ? (
+            <TouchableOpacity
+              style={{ backgroundColor: Colors.danger, paddingHorizontal: 12, paddingVertical: 6, borderRadius: 12 }}
+              onPress={async () => {
+                await BluetoothService.getInstance().disconnect();
+                useNetworkStore.getState().setLoraStatus(false);
+                Alert.alert('Disconnected', 'Bluetooth gateway connection closed.');
+              }}
+            >
+              <Text style={{ color: '#FFFFFF', fontSize: 11, fontWeight: 'bold' }}>🔴 Disconnect</Text>
+            </TouchableOpacity>
+          ) : (
+            <TouchableOpacity
+              style={{ backgroundColor: '#F4F5F7', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 12, borderWidth: 1, borderColor: Colors.cardBorder }}
+              onPress={() => setShowBtModal(true)}
+            >
+              <Text style={{ color: Colors.textPrimary, fontSize: 11, fontWeight: 'bold' }}>🔌 Bluetooth</Text>
+            </TouchableOpacity>
+          )}
         </View>
+
+        <BluetoothConnectModal visible={showBtModal} onClose={() => setShowBtModal(false)} />
 
         <FlatList
           data={devices}
@@ -53,7 +82,7 @@ export default function TeamScreen() {
             </View>
           }
           renderItem={({ item }) => {
-            const isThisNodeBtActive = isLoraConnected && btService.isConnected();
+            const isSelf = item.deviceId === selfId || item.deviceId === connectedBtName || (currentUser?.name && item.deviceId === currentUser.name);
 
             return (
               <View style={styles.memberCard}>
@@ -64,10 +93,10 @@ export default function TeamScreen() {
                     </Text>
                     <View style={styles.nameColumn}>
                       <Text style={styles.userName} numberOfLines={1}>
-                        {item.userName || item.deviceName}
+                        {item.userName || item.deviceName} {isSelf ? '(You)' : ''}
                       </Text>
                       <Text style={styles.deviceCode}>
-                        {t('person')} ID: {item.deviceId}
+                        {t('person')} ID: {item.deviceId} • {item.latitude.toFixed(4)}°N, {item.longitude.toFixed(4)}°E
                       </Text>
                     </View>
                   </View>
@@ -82,8 +111,8 @@ export default function TeamScreen() {
                     ⏱ {t('last_seen')}: {item.lastUpdated}
                   </Text>
 
-                  <Text style={[styles.metaText, isThisNodeBtActive ? { color: '#15803D', fontWeight: 'bold' } : {}]} numberOfLines={1}>
-                    {isThisNodeBtActive ? '📡 Bluetooth Connected' : '📱 Standalone Mobile'}
+                  <Text style={[styles.metaText, isSelf ? { color: '#15803D', fontWeight: 'bold' } : { color: '#0284C7', fontWeight: 'bold' }]} numberOfLines={1}>
+                    {isSelf ? '📍 This Device (GPS Active)' : '📡 LoRa Mesh Node'}
                   </Text>
                 </View>
 

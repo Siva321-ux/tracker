@@ -7,6 +7,7 @@ import { BluetoothService } from '../../src/services/bluetooth/BluetoothService'
 import { BluetoothConnectModal } from '../../src/components/BluetoothConnectModal';
 import { SyncManager } from '../../src/services/sync/SyncManager';
 import { useAuthStore } from '../../src/store/authStore';
+import { useNetworkStore } from '../../src/store/networkStore';
 import { Colors, Spacing } from '../../src/utils/responsive';
 
 export default function SettingsScreen() {
@@ -20,6 +21,14 @@ export default function SettingsScreen() {
   const [isBtConnected, setIsBtConnected] = useState(BluetoothService.getInstance().isConnected());
   const [isSyncing, setIsSyncing] = useState(false);
   const [showBtModal, setShowBtModal] = useState(false);
+
+  React.useEffect(() => {
+    setIsBtConnected(BluetoothService.getInstance().isConnected());
+    const unsub = BluetoothService.getInstance().onStatusChanged((connected) => {
+      setIsBtConnected(connected);
+    });
+    return () => unsub();
+  }, []);
 
   const handleSaveName = () => {
     if (!editName.trim()) {
@@ -137,6 +146,20 @@ export default function SettingsScreen() {
               {isBtConnected ? `✓ ${t('bluetooth_connected')}` : `🔌 ${t('connect_bluetooth')}`}
             </Text>
           </TouchableOpacity>
+
+          {isBtConnected && (
+            <TouchableOpacity
+              style={[styles.actionBtn, styles.btnDanger, { marginTop: Spacing.sm }]}
+              onPress={async () => {
+                await BluetoothService.getInstance().disconnect();
+                setIsBtConnected(false);
+                useNetworkStore.getState().setLoraStatus(false);
+                Alert.alert('Disconnected', 'Bluetooth gateway connection closed and session cleared.');
+              }}
+            >
+              <Text style={styles.actionBtnText}>🔴 Disconnect Bluetooth</Text>
+            </TouchableOpacity>
+          )}
 
           <TouchableOpacity
             style={[styles.actionBtn, isSimulating ? styles.btnDanger : styles.btnPrimary, { marginTop: Spacing.sm }]}

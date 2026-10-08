@@ -15,7 +15,10 @@
       "**/*"
     ],
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "runtimeVersion": {
+        "policy": "appVersion"
+      }
     },
     "android": {
       "adaptiveIcon": {
@@ -35,15 +38,51 @@
         "BLUETOOTH_CONNECT",
         "BLUETOOTH_SCAN",
         "INTERNET",
-        "WRITE_EXTERNAL_STORAGE"
+        "WRITE_EXTERNAL_STORAGE",
+        "android.permission.BLUETOOTH",
+        "android.permission.BLUETOOTH_ADMIN",
+        "android.permission.BLUETOOTH_CONNECT",
+        "android.permission.ACCESS_COARSE_LOCATION",
+        "android.permission.ACCESS_FINE_LOCATION",
+        "ACCESS_COARSE_LOCATION",
+        "ACCESS_FINE_LOCATION",
+        "BLUETOOTH",
+        "BLUETOOTH_ADMIN",
+        "BLUETOOTH_CONNECT",
+        "BLUETOOTH_SCAN",
+        "INTERNET",
+        "WRITE_EXTERNAL_STORAGE",
+        "android.permission.BLUETOOTH",
+        "android.permission.BLUETOOTH_ADMIN",
+        "android.permission.BLUETOOTH_CONNECT",
+        "android.permission.ACCESS_COARSE_LOCATION",
+        "android.permission.ACCESS_FINE_LOCATION"
       ],
-      "package": "com.sivaguru17.lorateamtracker"
+      "package": "com.sivaguru17.lorateamtracker",
+      "runtimeVersion": "1.0.0"
     },
     "web": {
       "favicon": "./assets/favicon.png"
     },
     "plugins": [
-      "expo-router"
+      "expo-router",
+      [
+        "react-native-ble-plx",
+        {
+          "isBackgroundEnabled": true,
+          "modes": [
+            "peripheral",
+            "central"
+          ],
+          "bluetoothAlwaysPermission": "Allow LoRa Team Tracker to connect to ESP32 LoRa Gateway Bluetooth radios."
+        }
+      ],
+      [
+        "expo-location",
+        {
+          "locationAlwaysAndWhenInUsePermission": "Allow LoRa Team Tracker to use your location for offline team tracking."
+        }
+      ]
     ],
     "scheme": "loratracker",
     "extra": {
@@ -54,6 +93,9 @@
         "projectId": "e9b33b5a-94ce-4d07-9cfa-45cf1137ab9a"
       }
     },
-    "owner": "siva_04"
+    "owner": "siva_04",
+    "updates": {
+      "url": "https://u.expo.dev/e9b33b5a-94ce-4d07-9cfa-45cf1137ab9a"
+    }
   }
 }

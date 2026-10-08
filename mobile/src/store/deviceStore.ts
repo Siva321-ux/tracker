@@ -15,6 +15,7 @@ interface DeviceStoreState {
   devices: Record<string, DeviceMarker>;
   selectedDeviceId: string | null;
   setDevices: (devices: Record<string, DeviceMarker>) => void;
+  registerDevice: (deviceId: string, deviceName?: string, userName?: string) => void;
   updateDeviceLocation: (
     deviceId: string,
     lat: number,
@@ -33,6 +34,27 @@ export const useDeviceStore = create<DeviceStoreState>((set) => ({
   devices: {},
   selectedDeviceId: null,
   setDevices: (devices) => set({ devices }),
+  registerDevice: (deviceId, deviceName, userName) =>
+    set((state) => {
+      if (!deviceId || deviceId === 'User' || deviceId === 'ESP32 Gateway') return state;
+      const updatedDevices = { ...state.devices };
+      delete updatedDevices['User'];
+      delete updatedDevices['ESP32 Gateway'];
+      if (!updatedDevices[deviceId]) {
+        updatedDevices[deviceId] = {
+          deviceId,
+          deviceName: deviceName || deviceId,
+          userName: userName || deviceId,
+          latitude: 11.5034,
+          longitude: 77.2444,
+          lastUpdated: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          batteryOrValue: 100,
+          status: 'online'
+        };
+        return { devices: updatedDevices };
+      }
+      return state;
+    }),
   updateDeviceLocation: (deviceId, lat, lon, time, value, deviceName, userName) =>
     set((state) => {
       const updatedDevices = { ...state.devices };

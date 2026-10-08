@@ -1,17 +1,34 @@
 import React, { useEffect } from 'react';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import { Platform } from 'react-native';
+import { Platform, View } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
+import { Colors } from '../src/utils/responsive';
 import { initMobileDatabase } from '../src/database/sqlite';
 import { BluetoothService } from '../src/services/bluetooth/BluetoothService';
 import { LoraPacketParser } from '../src/services/lora/LoraPacketParser';
 import { useDeviceStore } from '../src/store/deviceStore';
+import { useAuthStore } from '../src/store/authStore';
+import { useNetworkStore } from '../src/store/networkStore';
 import { saveLocationLocally } from '../src/database/dbQueries';
 import { LocationTrackerService } from '../src/services/location/LocationTrackerService';
-import { Colors } from '../src/utils/responsive';
+import {
+  useFonts,
+  OpenSans_300Light,
+  OpenSans_400Regular,
+  OpenSans_600SemiBold,
+  OpenSans_700Bold,
+  OpenSans_800ExtraBold
+} from '@expo-google-fonts/open-sans';
 
 export default function RootLayout() {
+  const [fontsLoaded] = useFonts({
+    OpenSans_300Light,
+    OpenSans_400Regular,
+    OpenSans_600SemiBold,
+    OpenSans_700Bold,
+    OpenSans_800ExtraBold
+  });
   useEffect(() => {
     // Inject Open Sans Google Font for Web platform
     if (Platform.OS === 'web' && typeof document !== 'undefined') {
@@ -31,13 +48,31 @@ export default function RootLayout() {
 
     initMobileDatabase().catch((err) => console.error('Mobile DB init error:', err));
 
-    // Request native Bluetooth & Location runtime permissions on mobile launch
-    BluetoothService.getInstance().requestPermissions().catch((err) =>
-      console.warn('[RootLayout] Bluetooth permission request error:', err)
-    );
+    const unsubStatus = BluetoothService.getInstance().onStatusChanged((connected) => {
+      useNetworkStore.getState().setLoraStatus(connected);
+      if (connected) {
+        LocationTrackerService.getInstance().broadcastLocationPacket().catch(() => {});
+      }
+    });
 
-    // Start automatic location tracking & Bluetooth telemetry broadcasting
-    LocationTrackerService.getInstance().startTracking(10000);
+    // Schedule background hardware permissions, tracking and auto-reconnect safely after UI mounts
+    const startupTimer = setTimeout(() => {
+      BluetoothService.getInstance().requestPermissions().then(() => {
+        BluetoothService.getInstance().autoReconnect().then((connected) => {
+          if (connected) {
+            useNetworkStore.getState().setLoraStatus(true);
+            LocationTrackerService.getInstance().broadcastLocationPacket().catch(() => {});
+          }
+        }).catch((err) =>
+          console.warn('[RootLayout] Auto-reconnect notice:', err)
+        );
+      }).catch((err) =>
+        console.warn('[RootLayout] Bluetooth permission request error:', err)
+      );
+
+      // Start periodic 5-second location tracking & Bluetooth telemetry broadcasting
+      LocationTrackerService.getInstance().startTracking(5000);
+    }, 600);
 
     const unsubscribe = BluetoothService.getInstance().onDataReceived((rawPacket) => {
       const parsed = LoraPacketParser.parse(rawPacket);
@@ -51,16 +86,22 @@ export default function RootLayout() {
         );
       } else if (parsed.type === 'CHAT' || parsed.type === 'PUBLIC') {
         const sender = parsed.senderId;
-        if (sender) {
-          const now = new Date();
-          const timeStr = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
-          useDeviceStore.getState().updateDeviceLocation(sender, 13.0827, 80.2707, timeStr, 100, sender, sender);
+        if (sender && sender !== 'User' && sender !== 'Mobile Node' && sender !== 'ESP32 Gateway') {
+          useDeviceStore.getState().registerDevice(sender, sender, sender);
         }
       }
     });
 
-    return () => unsubscribe();
+    return () => {
+      clearTimeout(startupTimer);
+      unsubStatus();
+      unsubscribe();
+    };
   }, []);
+
+  if (!fontsLoaded && Platform.OS !== 'web') {
+    return <View style={{ flex: 1, backgroundColor: Colors.background }} />;
+  }
 
   return (
     <SafeAreaProvider>

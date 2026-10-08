@@ -11,6 +11,7 @@ import {
   Alert
 } from 'react-native';
 import { BluetoothService, BluetoothDevice } from '../services/bluetooth/BluetoothService';
+import { LocationTrackerService } from '../services/location/LocationTrackerService';
 import { useNetworkStore } from '../store/networkStore';
 import { useDeviceStore } from '../store/deviceStore';
 import { useAuthStore } from '../store/authStore';
@@ -43,7 +44,17 @@ export const BluetoothConnectModal: React.FC<BluetoothConnectModalProps> = ({ vi
   const btService = BluetoothService.getInstance();
 
   useEffect(() => {
+    setConnectedDeviceId(btService.getConnectedDeviceId());
+    const unsub = btService.onStatusChanged((connected) => {
+      setConnectedDeviceId(btService.getConnectedDeviceId());
+      setLoraStatus(connected);
+    });
+    return () => unsub();
+  }, []);
+
+  useEffect(() => {
     if (visible) {
+      setConnectedDeviceId(btService.getConnectedDeviceId());
       handleScan();
     }
   }, [visible]);
@@ -75,8 +86,8 @@ export const BluetoothConnectModal: React.FC<BluetoothConnectModalProps> = ({ vi
             ? dev.name.split(' ')[0].trim()
             : user?.name || 'JESS';
 
-        setInputName(initialName);
-        setShowNamePrompt(true);
+        // Immediately trigger 5-second GPS tracking and presence broadcasting upon connect
+        LocationTrackerService.getInstance().startTracking(5000);
       }
     } catch (err: any) {
       Alert.alert('Connection Error', err.message || 'Unable to connect to Bluetooth device');
@@ -85,7 +96,12 @@ export const BluetoothConnectModal: React.FC<BluetoothConnectModalProps> = ({ vi
     }
   };
 
+  const [isSavingName, setIsSavingName] = useState<boolean>(false);
+
   const handleSaveNameAndActivate = async (customName?: string) => {
+    if (isSavingName) return;
+    setIsSavingName(true);
+
     const finalName = (customName !== undefined ? customName : inputName).trim() || user?.name || 'JESS';
 
     // 1. Set Bluetooth service connected device name
@@ -103,17 +119,10 @@ export const BluetoothConnectModal: React.FC<BluetoothConnectModalProps> = ({ vi
       'mesh-token-123'
     );
 
-    // 3. Send LOC handshake over Bluetooth to ESP32 / Radio Gateway
     const now = new Date();
     const timeStr = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
-    const locHandshake = `LOC,${finalName},13.0827,80.2707,${timeStr},100`;
-    try {
-      await btService.sendData(locHandshake);
-    } catch (e) {
-      console.log('Telemetry handshake notice:', e);
-    }
 
-    // 4. Register node in deviceStore
+    // 3. Instantly (0ms delay) register node in useDeviceStore so Team, Map & Chat UI update immediately
     useDeviceStore.getState().updateDeviceLocation(
       finalName,
       13.0827,
@@ -124,16 +133,24 @@ export const BluetoothConnectModal: React.FC<BluetoothConnectModalProps> = ({ vi
       finalName
     );
 
+    // 4. Instantly notify & close prompt
+    setShowNamePrompt(false);
+    setIsSavingName(false);
+
     useNotificationStore.getState().addNotification(
       'device',
       '🔌 Gateway Connected',
       `Connected to Bluetooth Radio "${finalName}". Data sharing active!`
     );
 
-    setShowNamePrompt(false);
     Alert.alert('✓ Bluetooth Connected', `Connected to "${finalName}". Radio mesh data sharing active!`, [
       { text: 'OK', onPress: () => onClose() }
     ]);
+
+    // 5. Start GPS tracking & immediate Bluetooth telemetry broadcast over radio
+    const tracker = LocationTrackerService.getInstance();
+    await tracker.startTracking(5000);
+    tracker.broadcastLocationPacket().catch(() => {});
   };
 
   const handleDisconnect = async () => {
@@ -228,8 +245,11 @@ export const BluetoothConnectModal: React.FC<BluetoothConnectModalProps> = ({ vi
                 <TouchableOpacity
                   style={styles.saveCallSignBtn}
                   onPress={() => handleSaveNameAndActivate()}
+                  disabled={isSavingName}
                 >
-                  <Text style={styles.saveCallSignText}>Set Name & Connect ➔</Text>
+                  <Text style={styles.saveCallSignText}>
+                    {isSavingName ? 'Saving...' : 'Set Name & Connect ➔'}
+                  </Text>
                 </TouchableOpacity>
               </View>
             </View>

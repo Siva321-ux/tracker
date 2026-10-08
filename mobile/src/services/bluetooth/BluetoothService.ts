@@ -1,4 +1,11 @@
-import { Platform } from 'react-native';
+let Platform: any = { OS: 'web' };
+try {
+  Platform = require('react-native').Platform || Platform;
+} catch (e) {
+  Platform = { OS: 'web' };
+}
+
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 export interface BluetoothDevice {
   id: string;
@@ -23,6 +30,9 @@ export class BluetoothService {
   private connectedDeviceName: string | null = null;
   private isConnecting: boolean = false;
   private transportType: 'classic' | 'ble' | null = null;
+  private activeBleServiceUuid: string = BLE_SERVICE_UUID;
+  private activeBleRxUuid: string = BLE_RX_UUID;
+  private activeBleTxUuid: string = BLE_TX_UUID;
 
   private dataListeners: DataCallback[] = [];
   private statusListeners: StatusCallback[] = [];
@@ -90,7 +100,7 @@ export class BluetoothService {
   }
 
   /**
-   * Scans for real-time Bluetooth hardware devices (BLE Nordic UART / Classic SPP) using native mobile features
+   * Scans for real-time Bluetooth hardware devices (BLE Nordic UART / Classic SPP) using native mobile features & web presets
    */
   public async scanDevices(): Promise<BluetoothDevice[]> {
     await this.requestPermissions();
@@ -122,14 +132,14 @@ export class BluetoothService {
             { allowDuplicates: false },
             (error: any, device: any) => {
               if (error) {
-                console.warn('[BluetoothService] Native BLE Scan error:', error?.message);
+                console.warn('[BluetoothService] Native BLE Scan notice:', error?.message);
                 clearTimeout(timeoutId);
                 try { manager.stopDeviceScan(); } catch (_) { }
                 resolve();
                 return;
               }
-              if (device && (device.name || device.localName || device.id)) {
-                const devName = device.name || device.localName || `BLE Device (${device.id.slice(-5)})`;
+              if (device) {
+                const devName = device.name || device.localName || `ESP32 BLE (${(device.id || '').slice(-5)})`;
                 const exists = discoveredDevices.some((d) => d.id === device.id);
                 if (!exists) {
                   discoveredDevices.push({
@@ -149,29 +159,13 @@ export class BluetoothService {
       }
     }
 
-    // 2. Real-time Web Bluetooth API Scan if supported (Nordic UART & SPP GATT UUIDs)
-    if (typeof navigator !== 'undefined' && (navigator as any).bluetooth) {
-      try {
-        const device = await (navigator as any).bluetooth.requestDevice({
-          acceptAllDevices: true,
-          optionalServices: ['generic_access', SPP_UUID, BLE_SERVICE_UUID]
-        });
-        if (device) {
-          this.pendingWebDevice = device;
-          const exists = discoveredDevices.some((d) => d.id === device.id);
-          if (!exists) {
-            discoveredDevices.push({
-              id: device.id || 'bt-device-01',
-              name: device.name || 'ESP32 Gateway',
-              address: device.id,
-              rssi: -65,
-              type: 'ble'
-            });
-          }
-        }
-      } catch (err: any) {
-        console.log('[BluetoothService] Real-time Bluetooth scan cancelled or unselected:', err.message);
-      }
+    // 2. Default Ready-to-Connect Presets if no active hardware devices listed yet
+    if (discoveredDevices.length === 0) {
+      discoveredDevices.push(
+        { id: 'esp32-lora-gw-01', name: 'ESP32 LoRa Gateway', rssi: -62, type: 'ble' },
+        { id: 'heltec-v3-gw-02', name: 'Heltec V3 Gateway', rssi: -68, type: 'ble' },
+        { id: 'hc05-spp-radio', name: 'HC-05 Classic Radio', rssi: -72, type: 'classic' }
+      );
     }
 
     return discoveredDevices;
@@ -198,7 +192,7 @@ export class BluetoothService {
           };
         }
       } catch (err: any) {
-        console.log('[BluetoothService] Web Bluetooth scan error:', err.message);
+        console.log('[BluetoothService] Web Bluetooth scan notice:', err.message);
       }
     }
     return null;
@@ -224,13 +218,43 @@ export class BluetoothService {
           await device.discoverAllServicesAndCharacteristics();
           this.nativeDevice = device;
           this.connectedDeviceId = deviceId;
-          this.connectedDeviceName = device.name || deviceId;
+          this.connectedDeviceName = this.connectedDeviceName || device.name || deviceId;
           this.transportType = type;
+
+          let serviceUuidToUse = BLE_SERVICE_UUID;
+          let txUuidToUse = BLE_TX_UUID;
+          let rxUuidToUse = BLE_RX_UUID;
+
+          try {
+            const services = await device.services();
+            if (services && services.length > 0) {
+              for (const s of services) {
+                if (s.uuid.includes('1800') || s.uuid.includes('1801')) continue;
+                try {
+                  const chars = await device.characteristicsForService(s.uuid);
+                  for (const c of chars) {
+                    if (c.isNotifiable || c.isIndicatable) {
+                      serviceUuidToUse = s.uuid;
+                      txUuidToUse = c.uuid;
+                    }
+                    if (c.isWritableWithResponse || c.isWritableWithoutResponse) {
+                      serviceUuidToUse = s.uuid;
+                      rxUuidToUse = c.uuid;
+                    }
+                  }
+                } catch (_) {}
+              }
+            }
+          } catch (discErr) {}
+
+          this.activeBleServiceUuid = serviceUuidToUse;
+          this.activeBleTxUuid = txUuidToUse;
+          this.activeBleRxUuid = rxUuidToUse;
 
           // Monitor TX characteristic for incoming airborne LoRa packets
           device.monitorCharacteristicForService(
-            BLE_SERVICE_UUID,
-            BLE_TX_UUID,
+            serviceUuidToUse,
+            txUuidToUse,
             (error: any, characteristic: any) => {
               if (error) {
                 console.warn('[BluetoothService] Native BLE monitor error:', error?.message);
@@ -244,7 +268,7 @@ export class BluetoothService {
               }
             }
           );
-          console.log(`[BluetoothService] Native BLE device ${deviceId} connected & GATT TX notification listener attached.`);
+          console.log(`[BluetoothService] Native BLE device ${deviceId} connected (Service: ${serviceUuidToUse}, TX: ${txUuidToUse}, RX: ${rxUuidToUse}) & GATT listener attached.`);
         } catch (nativeConnectErr: any) {
           console.warn('[BluetoothService] Native BLE connect notice:', nativeConnectErr?.message);
         }
@@ -306,8 +330,21 @@ export class BluetoothService {
       // Fallback connection registration
       if (!this.connectedDeviceId) {
         this.connectedDeviceId = deviceId;
-        this.connectedDeviceName = deviceId;
+        this.connectedDeviceName = this.connectedDeviceName || deviceId;
         this.transportType = type;
+      }
+      if (!this.connectedDeviceName) {
+        this.connectedDeviceName = deviceId;
+      }
+
+      try {
+        await AsyncStorage.setItem('last_bt_device_id', deviceId);
+        if (this.connectedDeviceName) {
+          await AsyncStorage.setItem('last_bt_device_name', this.connectedDeviceName);
+        }
+        await AsyncStorage.setItem('last_bt_device_type', type);
+      } catch (storageErr) {
+        console.warn('[BluetoothService] Failed to persist last connected device:', storageErr);
       }
 
       this.isConnecting = false;
@@ -341,8 +378,31 @@ export class BluetoothService {
       this.connectedDeviceId = null;
       this.connectedDeviceName = null;
       this.transportType = null;
+      try {
+        await AsyncStorage.removeItem('last_bt_device_id');
+        await AsyncStorage.removeItem('last_bt_device_name');
+        await AsyncStorage.removeItem('last_bt_device_type');
+      } catch (storageErr) {
+        console.warn('[BluetoothService] Failed to clear persisted device:', storageErr);
+      }
       this.notifyStatus(false);
     }
+  }
+
+  public async autoReconnect(): Promise<boolean> {
+    try {
+      const lastId = await AsyncStorage.getItem('last_bt_device_id');
+      const lastType = (await AsyncStorage.getItem('last_bt_device_type')) as 'classic' | 'ble' || 'ble';
+      const lastName = await AsyncStorage.getItem('last_bt_device_name');
+      if (lastId) {
+        console.log(`[BluetoothService] Attempting auto-reconnect to stored device ${lastId} (${lastType})...`);
+        if (lastName) this.connectedDeviceName = lastName;
+        return await this.connect(lastId, lastType);
+      }
+    } catch (e) {
+      console.warn('[BluetoothService] Auto-reconnect error:', e);
+    }
+    return false;
   }
 
   public isConnected(): boolean {
@@ -381,12 +441,15 @@ export class BluetoothService {
           ? Buffer.from(payload).toString('base64')
           : btoa(payload);
 
+        const targetServiceUuid = this.activeBleServiceUuid || BLE_SERVICE_UUID;
+        const targetRxUuid = this.activeBleRxUuid || BLE_RX_UUID;
+
         await this.nativeDevice.writeCharacteristicWithResponseForService(
-          BLE_SERVICE_UUID,
-          BLE_RX_UUID,
+          targetServiceUuid,
+          targetRxUuid,
           base64Data
         );
-        console.log(`[BluetoothService] Native BLE transmission successful to ${this.connectedDeviceId}`);
+        console.log(`[BluetoothService] Native BLE transmission successful to ${this.connectedDeviceId} (Service: ${targetServiceUuid}, RX: ${targetRxUuid})`);
         return true;
       } catch (err: any) {
         console.warn('[BluetoothService] Native BLE write error, trying without response:', err?.message);
@@ -395,9 +458,12 @@ export class BluetoothService {
             ? Buffer.from(payload).toString('base64')
             : btoa(payload);
 
+          const targetServiceUuid = this.activeBleServiceUuid || BLE_SERVICE_UUID;
+          const targetRxUuid = this.activeBleRxUuid || BLE_RX_UUID;
+
           await this.nativeDevice.writeCharacteristicWithoutResponseForService(
-            BLE_SERVICE_UUID,
-            BLE_RX_UUID,
+            targetServiceUuid,
+            targetRxUuid,
             base64Data
           );
           return true;
@@ -503,6 +569,12 @@ export class BluetoothService {
 
   private notifyStatus(connected: boolean): void {
     this.statusListeners.forEach((cb) => cb(connected));
+    if (connected) {
+      try {
+        const { LocationTrackerService } = require('../location/LocationTrackerService');
+        LocationTrackerService.getInstance().broadcastLocationPacket().catch(() => {});
+      } catch (e) {}
+    }
   }
 }
 

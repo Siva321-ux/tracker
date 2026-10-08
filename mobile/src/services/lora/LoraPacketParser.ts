@@ -48,11 +48,6 @@ export class LoraPacketParser {
     if (!trimmed) return null;
 
     const parts = trimmed.split(',');
-    if (parts.length < 2) {
-      console.warn(`LoraPacketParser: Invalid packet format (insufficient fields): "${trimmed}"`);
-      return null;
-    }
-
     const packetType = parts[0].toUpperCase();
 
     try {
@@ -73,7 +68,16 @@ export class LoraPacketParser {
         case 'STATUS':
           return LoraPacketParser.parseStatusPacket(parts, trimmed);
         default:
-          console.warn(`LoraPacketParser: Unknown packet type "${packetType}" in: "${trimmed}"`);
+          // Raw unformatted text broadcast (e.g. from HC-05 / terminal)
+          if (trimmed.length > 0 && !trimmed.includes('{') && !trimmed.startsWith('OK+')) {
+            return {
+              type: 'PUBLIC',
+              senderId: 'Radio Gateway',
+              teamId: 'ALL',
+              message: trimmed,
+              raw: trimmed
+            };
+          }
           return null;
       }
     } catch (err: any) {
@@ -83,9 +87,9 @@ export class LoraPacketParser {
   }
 
   private static parseLocPacket(parts: string[], raw: string): ParsedLocPacket | null {
-    // Format: LOC,dev1,28.6050,77.3700,12:02:00,88
-    if (parts.length < 5) {
-      console.warn(`LoraPacketParser: Malformed LOC packet (less than 5 fields): "${raw}"`);
+    // Format: LOC,deviceId,lat,lon[,timeOrBattery][,battery]
+    if (parts.length < 4) {
+      console.warn(`LoraPacketParser: Malformed LOC packet (less than 4 fields): "${raw}"`);
       return null;
     }
 
@@ -108,9 +112,22 @@ export class LoraPacketParser {
       return null;
     }
 
-    const time = parts[4] ? parts[4].trim() : new Date().toTimeString().split(' ')[0];
-    const rawVal = parts[5] !== undefined ? parseFloat(parts[5]) : 0;
-    const value = isNaN(rawVal) ? 0 : rawVal;
+    let time = new Date().toTimeString().split(' ')[0].substring(0, 5);
+    let value = 100;
+
+    if (parts.length >= 5) {
+      const field4 = parts[4].trim();
+      if (field4.includes(':')) {
+        time = field4;
+        if (parts.length >= 6) {
+          const val = parseFloat(parts[5]);
+          if (!isNaN(val)) value = val;
+        }
+      } else {
+        const val = parseFloat(field4);
+        if (!isNaN(val)) value = val;
+      }
+    }
 
     return {
       type: 'LOC',

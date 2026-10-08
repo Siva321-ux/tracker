@@ -45,6 +45,7 @@ export const ta: Record<TranslationKeys, string> = {
   public_team_chat: 'பொதுக் குழு அரட்டை',
   private_messages: 'தனிப்பட்ட மனிதர் செய்திகள்',
   type_message: 'செய்தியை உள்ளிடவும்...',
+  send: 'அனுப்பு',
   waiting_connection: 'BLE மெஷ் அனுப்பப்பட்டது • ⏳ கிளவுட் நிலுவை',
   synced: 'BLE மெஷ் அனுப்பப்பட்டது • ✓ ஒத்திசைக்கப்பட்டது',
 

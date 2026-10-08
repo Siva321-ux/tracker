@@ -28,15 +28,9 @@ export default function MapScreen() {
   const [showBtModal, setShowBtModal] = useState(false);
 
   useEffect(() => {
-    // If Bluetooth is not connected, purge stale markers & auth session from memory
-    if (!BluetoothService.getInstance().isConnected()) {
-      useDeviceStore.getState().clearDevices();
-      useAuthStore.getState().logout();
-    } else {
-      LocationTrackerService.getInstance().acquireCurrentPosition().then(() => {
-        LocationTrackerService.getInstance().broadcastLocationPacket();
-      });
-    }
+    LocationTrackerService.getInstance().acquireCurrentPosition().then(() => {
+      LocationTrackerService.getInstance().broadcastLocationPacket();
+    });
   }, []);
 
   return (
@@ -52,16 +46,9 @@ export default function MapScreen() {
           <TouchableOpacity
             style={styles.btBtn}
             onPress={async () => {
-              if (!BluetoothService.getInstance().isConnected()) {
-                Alert.alert(
-                  '🔌 Bluetooth Required',
-                  'Please connect to an ESP32 or Bluetooth Gateway first to set your node call sign & share map telemetry.',
-                  [{ text: 'Connect Bluetooth', onPress: () => setShowBtModal(true) }, { text: 'Cancel' }]
-                );
-                return;
-              }
-              await LocationTrackerService.getInstance().acquireCurrentPosition();
+              const pos = await LocationTrackerService.getInstance().acquireCurrentPosition();
               await LocationTrackerService.getInstance().broadcastLocationPacket();
+              Alert.alert('📍 Position & Battery Refreshed', `Latitude: ${pos.latitude.toFixed(4)}°\nLongitude: ${pos.longitude.toFixed(4)}°`);
             }}
           >
             <Text style={styles.btBtnText}>📍 My Pin</Text>
@@ -70,6 +57,19 @@ export default function MapScreen() {
           <TouchableOpacity style={styles.btBtn} onPress={() => setShowBtModal(true)}>
             <Text style={styles.btBtnText}>🔌 Bluetooth</Text>
           </TouchableOpacity>
+
+          {isLoraConnected && (
+            <TouchableOpacity
+              style={[styles.btBtn, { backgroundColor: Colors.danger }]}
+              onPress={async () => {
+                await BluetoothService.getInstance().disconnect();
+                useNetworkStore.getState().setLoraStatus(false);
+                Alert.alert('Disconnected', 'Bluetooth gateway connection closed.');
+              }}
+            >
+              <Text style={[styles.btBtnText, { color: '#FFFFFF' }]}>🔴 Disconnect</Text>
+            </TouchableOpacity>
+          )}
         </View>
       </View>
 
