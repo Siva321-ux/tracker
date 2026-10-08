@@ -202,5 +202,5 @@ export const useDeviceStore = create<DeviceStoreState>((set) => ({
       return { devices: nextDevices };
     }),
   selectDevice: (deviceId) => set({ selectedDeviceId: deviceId }),
-  clearDevices: () => set((state) => ({ devices: { self: state.devices.self }, selectedDeviceId: null }))
+  clearDevices: () => set({ devices: {}, selectedDeviceId: null })
 }));

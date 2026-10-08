@@ -16,7 +16,9 @@ import {
   savePublicMessageLocally,
   savePrivateMessageLocally,
   getPublicMessagesLocally,
-  getPrivateMessagesLocally
+  getPrivateMessagesLocally,
+  clearPublicMessagesLocally,
+  clearPrivateMessagesLocally
 } from '../../src/database/dbQueries';
 import { useNetworkStore } from '../../src/store/networkStore';
 import { useAuthStore } from '../../src/store/authStore';
@@ -267,6 +269,30 @@ export default function ChatScreen() {
     }
   };
 
+  const handleClearChat = () => {
+    Alert.alert(
+      'Clear Chat',
+      `Are you sure you want to delete all messages in the ${chatTab === 'public' ? 'Public' : 'Private'} channel?`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Clear',
+          style: 'destructive',
+          onPress: async () => {
+            if (chatTab === 'public') {
+              await clearPublicMessagesLocally();
+              setPublicMessages([]);
+            } else {
+              // Delete all private messages entirely (since they share a single SQLite table for now)
+              await clearPrivateMessagesLocally();
+              setMessagesByDevice({});
+            }
+          }
+        }
+      ]
+    );
+  };
+
   const currentMessages = chatTab === 'public' ? publicMessages : (messagesByDevice[selectedDevice] || []);
   const activeTargetDev = devices.find((d) => d.deviceId === selectedDevice || d.userName === selectedDevice);
 
@@ -331,20 +357,30 @@ export default function ChatScreen() {
             </View>
           ) : (
             <View style={styles.peerBanner}>
-              <Text style={styles.peerBannerTitle}>
-                Broadcast Channel: <Text style={styles.peerHighlight}>Team 1 Public Mesh</Text>
-              </Text>
-              <Text style={styles.peerBannerSub}>🌐 Broadcasts to all connected field nodes</Text>
+              <View>
+                <Text style={styles.peerBannerTitle}>
+                  Broadcast Channel: <Text style={styles.peerHighlight}>Team 1 Public Mesh</Text>
+                </Text>
+                <Text style={styles.peerBannerSub}>🌐 Broadcasts to all connected field nodes</Text>
+              </View>
+              <TouchableOpacity onPress={handleClearChat} style={styles.clearChatBtn}>
+                <Text style={styles.clearChatBtnText}>🗑️ Clear</Text>
+              </TouchableOpacity>
             </View>
           )}
 
           {/* Active Private Chat Peer Banner (Private Mode Only) */}
           {chatTab === 'private' && selectedDevice && selectedDevice !== 'User' && (
             <View style={styles.peerBanner}>
-              <Text style={styles.peerBannerTitle}>
-                🔒 Direct Message: <Text style={styles.peerHighlight}>{activeTargetDev?.userName || activeTargetDev?.deviceName || selectedDevice}</Text>
-              </Text>
-              <Text style={styles.peerBannerSub}>📡 {t('bluetooth_connected')}</Text>
+              <View>
+                <Text style={styles.peerBannerTitle}>
+                  🔒 Direct Message: <Text style={styles.peerHighlight}>{activeTargetDev?.userName || activeTargetDev?.deviceName || selectedDevice}</Text>
+                </Text>
+                <Text style={styles.peerBannerSub}>📡 {t('bluetooth_connected')}</Text>
+              </View>
+              <TouchableOpacity onPress={handleClearChat} style={styles.clearChatBtn}>
+                <Text style={styles.clearChatBtnText}>🗑️ Clear</Text>
+              </TouchableOpacity>
             </View>
           )}
 
@@ -486,6 +522,19 @@ const styles = StyleSheet.create({
     fontSize: 10,
     fontWeight: '500',
     fontFamily: 'OpenSans_400Regular'
+  },
+  clearChatBtn: {
+    backgroundColor: '#FEE2E2',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: '#FCA5A5'
+  },
+  clearChatBtnText: {
+    color: '#DC2626',
+    fontSize: 10,
+    fontWeight: 'bold'
   },
   chatContainer: {
     padding: Spacing.md

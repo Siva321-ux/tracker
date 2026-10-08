@@ -127,6 +127,14 @@ export async function getPrivateMessagesLocally() {
   return await executeMobileQuery('SELECT * FROM private_messages ORDER BY id ASC');
 }
 
+export async function clearPublicMessagesLocally() {
+  return await executeMobileQuery('DELETE FROM public_messages');
+}
+
+export async function clearPrivateMessagesLocally() {
+  return await executeMobileQuery('DELETE FROM private_messages');
+}
+
 export async function getLocalOfflineRegions() {
   return await executeMobileQuery('SELECT * FROM offline_regions ORDER BY created_at DESC');
 }
