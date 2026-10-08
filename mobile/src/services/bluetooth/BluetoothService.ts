@@ -511,27 +511,18 @@ export class BluetoothService {
 
       const performWrite = async () => {
         try {
-          // Primary: WithResponse triggers GATT Long Write, guaranteeing atomic delivery
-          // even if the Android MTU negotiation failed!
-          await this.nativeDevice!.writeCharacteristicWithResponseForService(
+          // EXCLUSIVELY use WithoutResponse! 
+          // The ESP32 crashes if Android attempts to use WithResponse (GATT Long Write).
+          // Since MTU is negotiated to 512, WithoutResponse natively transmits the entire >20 byte packet perfectly!
+          await this.nativeDevice!.writeCharacteristicWithoutResponseForService(
             targetServiceUuid,
             targetRxUuid,
             base64Data
           );
           return true;
         } catch (err: any) {
-          try {
-            // Fallback: WithoutResponse (will work perfectly if MTU was successfully negotiated to 512)
-            await this.nativeDevice!.writeCharacteristicWithoutResponseForService(
-              targetServiceUuid,
-              targetRxUuid,
-              base64Data
-            );
-            return true;
-          } catch (err2: any) {
-            console.error('[BluetoothService] Native BLE write failed completely:', err2?.message);
-            return false;
-          }
+          console.error('[BluetoothService] Native BLE WithoutResponse write failed:', err?.message);
+          return false;
         }
       };
 
