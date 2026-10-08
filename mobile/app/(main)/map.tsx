@@ -64,7 +64,8 @@ export default function MapScreen() {
               onPress={async () => {
                 await BluetoothService.getInstance().disconnect();
                 useNetworkStore.getState().setLoraStatus(false);
-                Alert.alert('Disconnected', 'Bluetooth gateway connection closed.');
+                await LocationTrackerService.getInstance().broadcastLocationPacket();
+                Alert.alert('Disconnected', 'Bluetooth gateway connection closed. Radio returned to Mobile Node.');
               }}
             >
               <Text style={[styles.btBtnText, { color: '#FFFFFF' }]}>🔴 Disconnect</Text>

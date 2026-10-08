@@ -23,12 +23,7 @@ export default function TeamScreen() {
   const selfId = getLocalNodeIdSync();
   const [showBtModal, setShowBtModal] = useState(false);
 
-  const devices = useDeviceStore((s) =>
-    Object.values(s.devices).filter((d) => {
-      const name = d.userName || d.deviceName || d.deviceId;
-      return name !== 'User' && name !== 'ESP32 Gateway' && d.deviceId !== 'User' && d.deviceId !== 'ESP32 Gateway';
-    })
-  );
+  const devices = useDeviceStore((s) => Object.values(s.devices));
   const activePeopleCount = devices.length;
 
   return (
@@ -41,7 +36,7 @@ export default function TeamScreen() {
           <View>
             <Text style={styles.headerTitle}>👥 {t('team_response_team')}</Text>
             <Text style={styles.headerSubtitle}>
-              {t('connected_people_count').replace('{count}', String(activePeopleCount))}
+              {t('connected_people_count').replace('{count}', String(activePeopleCount))} • {isLoraConnected ? `📡 Radio Gateway (${connectedBtName || 'Active'})` : '📱 Standalone Mobile'}
             </Text>
           </View>
 
@@ -51,7 +46,7 @@ export default function TeamScreen() {
               onPress={async () => {
                 await BluetoothService.getInstance().disconnect();
                 useNetworkStore.getState().setLoraStatus(false);
-                Alert.alert('Disconnected', 'Bluetooth gateway connection closed.');
+                Alert.alert('Disconnected', 'Bluetooth gateway connection closed. Radio returned to Mobile Node.');
               }}
             >
               <Text style={{ color: '#FFFFFF', fontSize: 11, fontWeight: 'bold' }}>🔴 Disconnect</Text>
@@ -82,7 +77,9 @@ export default function TeamScreen() {
             </View>
           }
           renderItem={({ item }) => {
-            const isSelf = item.deviceId === selfId || item.deviceId === connectedBtName || (currentUser?.name && item.deviceId === currentUser.name);
+            const isSelf = item.isSelf || item.deviceId === 'self';
+            const cleanName = item.userName || item.deviceName || item.deviceId;
+            const displayName = isSelf ? (cleanName.includes('(You)') ? cleanName : `${cleanName} (You)`) : cleanName;
 
             return (
               <View style={styles.memberCard}>
@@ -93,10 +90,10 @@ export default function TeamScreen() {
                     </Text>
                     <View style={styles.nameColumn}>
                       <Text style={styles.userName} numberOfLines={1}>
-                        {item.userName || item.deviceName} {isSelf ? '(You)' : ''}
+                        {displayName}
                       </Text>
                       <Text style={styles.deviceCode}>
-                        {t('person')} ID: {item.deviceId} • {item.latitude.toFixed(4)}°N, {item.longitude.toFixed(4)}°E
+                        {t('person')} ID: {isSelf ? cleanName : item.deviceId} • {item.latitude.toFixed(4)}°N, {item.longitude.toFixed(4)}°E
                       </Text>
                     </View>
                   </View>

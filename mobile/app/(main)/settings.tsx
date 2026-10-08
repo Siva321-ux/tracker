@@ -10,12 +10,15 @@ import { useAuthStore } from '../../src/store/authStore';
 import { useNetworkStore } from '../../src/store/networkStore';
 import { Colors, Spacing } from '../../src/utils/responsive';
 
+import { setLocalCallSign } from '../../src/utils/nodeIdentity';
+import { LocationTrackerService } from '../../src/services/location/LocationTrackerService';
+
 export default function SettingsScreen() {
   const insets = useSafeAreaInsets();
   const { language, setLanguage, t } = useLanguageStore();
-  const { user, updateUserName } = useAuthStore();
+  const { user } = useAuthStore();
 
-  const [editName, setEditName] = useState(user?.name || 'Field User');
+  const [editName, setEditName] = useState(user?.name || 'Mobile Node');
   const [isEditing, setIsEditing] = useState(false);
   const [isSimulating, setIsSimulating] = useState(LoraSimulator.getInstance().isSimulating());
   const [isBtConnected, setIsBtConnected] = useState(BluetoothService.getInstance().isConnected());
@@ -30,14 +33,16 @@ export default function SettingsScreen() {
     return () => unsub();
   }, []);
 
-  const handleSaveName = () => {
-    if (!editName.trim()) {
+  const handleSaveName = async () => {
+    const trimmed = editName.trim();
+    if (!trimmed) {
       Alert.alert('Error', 'User name cannot be empty.');
       return;
     }
-    updateUserName(editName.trim());
+    await setLocalCallSign(trimmed);
+    LocationTrackerService.getInstance().broadcastLocationPacket().catch(() => {});
     setIsEditing(false);
-    Alert.alert('Profile Updated', `User name updated to "${editName.trim()}"`);
+    Alert.alert('Profile Updated', `User name updated to "${trimmed}"`);
   };
 
   const handleToggleSimulator = () => {

@@ -24,9 +24,17 @@ export const DeviceBottomSheet: React.FC<DeviceBottomSheetProps> = ({
 
   if (!device) return null;
 
-  const handleSaveName = () => {
-    if (editName.trim()) {
-      setCustomDeviceName(device.deviceId, editName.trim());
+  const handleSaveName = async () => {
+    const trimmed = editName.trim();
+    if (trimmed) {
+      if (device.isSelf || device.deviceId === 'self') {
+        const { setLocalCallSign } = require('../utils/nodeIdentity');
+        await setLocalCallSign(trimmed);
+        const { LocationTrackerService } = require('../services/location/LocationTrackerService');
+        LocationTrackerService.getInstance().broadcastLocationPacket().catch(() => {});
+      } else {
+        setCustomDeviceName(device.deviceId, trimmed);
+      }
     }
     setIsEditing(false);
   };
@@ -67,22 +75,22 @@ export const DeviceBottomSheet: React.FC<DeviceBottomSheetProps> = ({
       <View style={styles.grid}>
         <View style={styles.gridItem}>
           <Text style={styles.label}>{t('latitude')}</Text>
-          <Text style={styles.value}>{device.latitude.toFixed(6)}° N</Text>
+          <Text style={styles.value}>{Number(device.latitude || 0).toFixed(6)}° N</Text>
         </View>
 
         <View style={styles.gridItem}>
           <Text style={styles.label}>{t('longitude')}</Text>
-          <Text style={styles.value}>{device.longitude.toFixed(6)}° E</Text>
+          <Text style={styles.value}>{Number(device.longitude || 0).toFixed(6)}° E</Text>
         </View>
 
         <View style={styles.gridItem}>
           <Text style={styles.label}>{t('last_updated')}</Text>
-          <Text style={styles.value}>{device.lastUpdated}</Text>
+          <Text style={styles.value}>{device.lastUpdated || 'Just now'}</Text>
         </View>
 
         <View style={styles.gridItem}>
           <Text style={styles.label}>{t('battery_telemetry')}</Text>
-          <Text style={styles.accentValue}>🔋 {device.batteryOrValue}%</Text>
+          <Text style={styles.accentValue}>🔋 {device.batteryOrValue ?? 100}%</Text>
         </View>
       </View>
 

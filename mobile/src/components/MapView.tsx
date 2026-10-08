@@ -35,15 +35,20 @@ export const FieldMapView: React.FC<MapViewProps> = ({
 
   const generateMapHtml = () => {
     const markersJson = JSON.stringify(
-      deviceList.map((d) => ({
-        id: d.deviceId,
-        name: d.userName || d.deviceName || d.deviceId,
-        lat: d.latitude,
-        lon: d.longitude,
-        battery: d.batteryOrValue,
-        time: d.lastUpdated,
-        status: d.status
-      }))
+      deviceList.map((d) => {
+        const isSelf = d.isSelf || d.deviceId === 'self';
+        const cleanName = d.userName || d.deviceName || d.deviceId;
+        const displayName = isSelf ? (cleanName.includes('(You)') ? cleanName : `${cleanName} (You)`) : cleanName;
+        return {
+          id: d.deviceId,
+          name: displayName,
+          lat: d.latitude,
+          lon: d.longitude,
+          battery: d.batteryOrValue,
+          time: d.lastUpdated,
+          status: d.status
+        };
+      })
     );
 
     const tileUrl =
@@ -114,8 +119,18 @@ export const FieldMapView: React.FC<MapViewProps> = ({
               iconAnchor: [40, 18]
             });
             var marker = L.marker([m.lat, m.lon], { icon: customIcon }).addTo(map);
+            var popupContent = '<div style="color:#18181B;font-family:sans-serif;font-size:12px;min-width:150px;padding:2px;line-height:1.5;">' +
+              '<b style="font-size:13px;color:#0F172A;">📍 ' + m.name + '</b><br/>' +
+              '<span style="color:#475569;"><b>Latitude:</b> ' + Number(m.lat).toFixed(6) + '° N</span><br/>' +
+              '<span style="color:#475569;"><b>Longitude:</b> ' + Number(m.lon).toFixed(6) + '° E</span><br/>' +
+              '<span style="color:#16A34A;font-weight:700;"><b>Battery:</b> 🔋 ' + m.battery + '%</span><br/>' +
+              '<span style="color:#64748B;font-size:11px;"><b>Updated:</b> ' + m.time + '</span>' +
+              '</div>';
+            marker.bindPopup(popupContent, { offset: [0, -12] });
+
             marker.on('click', function() {
-              var msg = JSON.stringify({ type: 'SELECT_DEVICE', deviceId: m.id });
+              marker.openPopup();
+              var msg = JSON.stringify({ type: 'SELECT_DEVICE', deviceId: m.id, name: m.name, lat: m.lat, lon: m.lon, battery: m.battery });
               if (window.ReactNativeWebView) {
                 window.ReactNativeWebView.postMessage(msg);
               } else if (window.parent) {
@@ -129,13 +144,25 @@ export const FieldMapView: React.FC<MapViewProps> = ({
     `;
   };
 
+  const findDevice = (deviceId: string): DeviceMarker | null => {
+    if (!deviceId) return null;
+    if (devices[deviceId]) return devices[deviceId];
+    const match = Object.values(devices).find(
+      (d) => d.deviceId === deviceId || d.userName === deviceId || d.deviceName === deviceId || (deviceId === 'self' && d.isSelf)
+    );
+    return match || null;
+  };
+
   useEffect(() => {
     if (Platform.OS === 'web') {
       const handleMessage = (event: MessageEvent) => {
         try {
           const data = typeof event.data === 'string' ? JSON.parse(event.data) : event.data;
-          if (data && data.type === 'SELECT_DEVICE' && devices[data.deviceId]) {
-            onSelectDevice(devices[data.deviceId]);
+          if (data && data.type === 'SELECT_DEVICE') {
+            const dev = findDevice(data.deviceId);
+            if (dev) {
+              onSelectDevice(dev);
+            }
           }
         } catch (e) {}
       };
@@ -163,8 +190,11 @@ export const FieldMapView: React.FC<MapViewProps> = ({
           onMessage={(event: any) => {
             try {
               const data = JSON.parse(event.nativeEvent.data);
-              if (data && data.type === 'SELECT_DEVICE' && devices[data.deviceId]) {
-                onSelectDevice(devices[data.deviceId]);
+              if (data && data.type === 'SELECT_DEVICE') {
+                const dev = findDevice(data.deviceId);
+                if (dev) {
+                  onSelectDevice(dev);
+                }
               }
             } catch (e) {}
           }}

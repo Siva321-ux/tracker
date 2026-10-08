@@ -70,7 +70,11 @@ export class LocationTrackerService {
     }
 
     this.trackingInterval = setInterval(async () => {
-      await this.broadcastLocationPacket();
+      try {
+        await this.broadcastLocationPacket();
+      } catch (err) {
+        console.warn('[LocationTrackerService] Interval broadcast error:', err);
+      }
     }, intervalMs);
   }
 
@@ -106,6 +110,10 @@ export class LocationTrackerService {
    * Acquires live hardware GPS coordinates from Expo Location or Browser Geolocation API
    */
   public async acquireCurrentPosition(): Promise<{ latitude: number; longitude: number }> {
+    if (this.hasAcquiredRealGps) {
+      return { latitude: this.currentLat, longitude: this.currentLon };
+    }
+
     try {
       if (Location) {
         // First check last known position for immediate accuracy
@@ -116,17 +124,18 @@ export class LocationTrackerService {
               this.currentLat = lastPos.coords.latitude;
               this.currentLon = lastPos.coords.longitude;
               this.hasAcquiredRealGps = true;
+              return { latitude: this.currentLat, longitude: this.currentLon };
             }
           } catch (_) {}
         }
 
-        // Fetch precise current GPS fix with generous 8s timeout
+        // Fetch precise current GPS fix with fast 2.5s timeout
         if (Location.getCurrentPositionAsync) {
           try {
             const posPromise = Location.getCurrentPositionAsync({
               accuracy: Location.Accuracy?.High || Location.Accuracy?.Balanced || 3,
             });
-            const timeoutPromise = new Promise<null>((r) => setTimeout(() => r(null), 8000));
+            const timeoutPromise = new Promise<null>((r) => setTimeout(() => r(null), 2500));
             const pos: any = await Promise.race([posPromise, timeoutPromise]);
             if (pos && pos.coords) {
               this.currentLat = pos.coords.latitude;
@@ -214,14 +223,11 @@ export class LocationTrackerService {
     const timeStr = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}:${String(now.getSeconds()).padStart(2, '0')}`;
 
     // 1. ALWAYS update local deviceStore map pin & SQLite DB for local user display
-    useDeviceStore.getState().updateDeviceLocation(
-      deviceId,
+    useDeviceStore.getState().updateLocalDeviceLocation(
       this.currentLat,
       this.currentLon,
       timeStr,
-      battery,
-      deviceId,
-      deviceId
+      battery
     );
 
     saveLocationLocally(deviceId, this.currentLat, this.currentLon, battery, timeStr).catch((err) =>

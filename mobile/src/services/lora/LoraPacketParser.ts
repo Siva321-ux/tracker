@@ -168,10 +168,40 @@ export class LoraPacketParser {
     try {
       const base64Regex = /^[A-Za-z0-9+/=]+$/;
       if (base64Regex.test(trimmed) && trimmed.length % 4 === 0) {
-        const decoded = typeof Buffer !== 'undefined'
-          ? Buffer.from(trimmed, 'base64').toString('utf-8')
-          : atob(trimmed);
-        if (decoded && /^[\x20-\x7E\s\r\n\t]+$/.test(decoded)) {
+        let decoded = '';
+        if (typeof Buffer !== 'undefined') {
+          decoded = Buffer.from(trimmed, 'base64').toString('utf-8');
+        } else {
+          // Standard Base64 Decoder
+          const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=';
+          const b64 = trimmed.replace(/[^A-Za-z0-9+/]/g, '');
+          let i = 0;
+          let rawBytes = '';
+          while (i < b64.length) {
+            const enc1 = chars.indexOf(b64.charAt(i++));
+            const enc2 = chars.indexOf(b64.charAt(i++));
+            const enc3 = chars.indexOf(b64.charAt(i++));
+            const enc4 = chars.indexOf(b64.charAt(i++));
+
+            const chr1 = (enc1 << 2) | (enc2 >> 4);
+            const chr2 = ((enc2 & 15) << 4) | (enc3 >> 2);
+            const chr3 = ((enc3 & 3) << 6) | enc4;
+
+            rawBytes += String.fromCharCode(chr1);
+            if (enc3 !== 64 && enc3 !== -1) rawBytes += String.fromCharCode(chr2);
+            if (enc4 !== 64 && enc4 !== -1) rawBytes += String.fromCharCode(chr3);
+          }
+          
+          try {
+            // Reconstruct UTF-16 Javascript string from raw UTF-8 bytes (Fixes emojis)
+            decoded = decodeURIComponent(escape(rawBytes));
+          } catch (e) {
+            decoded = rawBytes;
+          }
+        }
+        
+        // Remove the regex check that restricts output to ASCII, allowing emojis to pass
+        if (decoded && decoded.trim().length > 0) {
           return decoded;
         }
       }

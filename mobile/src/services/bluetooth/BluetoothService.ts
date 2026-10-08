@@ -215,7 +215,29 @@ export class BluetoothService {
         try {
           console.log(`[BluetoothService] Connecting native mobile BLE hardware device ${deviceId}...`);
           const device = await manager.connectToDevice(deviceId, { autoConnect: true });
-          await device.discoverAllServicesAndCharacteristics();
+          // Removed requestMTU: Many ESP32 firmwares do not support MTU negotiation
+          // and will completely freeze the Bluetooth pipeline if requested.
+          // try {
+          //  const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('MTU Timeout')), 1000));
+          //  await Promise.race([device.requestMTU(512), timeoutPromise]);
+          // } catch (_) {}
+          
+          try {
+             const discoveryTimeout = new Promise((_, reject) => setTimeout(() => reject(new Error('Discovery Timeout')), 5000));
+             await Promise.race([device.discoverAllServicesAndCharacteristics(), discoveryTimeout]);
+          } catch (e) {
+             console.warn('[BluetoothService] Service discovery timed out or failed, proceeding anyway:', e);
+          }
+
+          try {
+            // Request MTU *after* service discovery to safely enable large payloads
+            // and completely avoid the manual chunking problem (ESP32 lacks packet assembly).
+            await device.requestMTU(512);
+            console.log('[BluetoothService] MTU successfully negotiated to 512 bytes');
+          } catch (mtuErr: any) {
+            console.warn('[BluetoothService] MTU negotiation failed, device may be limited to 20 bytes:', mtuErr?.message);
+          }
+
           this.nativeDevice = device;
           this.connectedDeviceId = deviceId;
           this.connectedDeviceName = this.connectedDeviceName || device.name || deviceId;
@@ -261,9 +283,31 @@ export class BluetoothService {
                 return;
               }
               if (characteristic && characteristic.value) {
-                const textChunk = typeof Buffer !== 'undefined'
-                  ? Buffer.from(characteristic.value, 'base64').toString('utf-8')
-                  : atob(characteristic.value);
+                let textChunk = '';
+                if (typeof Buffer !== 'undefined') {
+                  textChunk = Buffer.from(characteristic.value, 'base64').toString('utf-8');
+                } else {
+                  // Standard Base64 Decoder
+                  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=';
+                  const str = String(characteristic.value).replace(/[^A-Za-z0-9+/]/g, '');
+                  let output = '';
+                  let i = 0;
+                  while (i < str.length) {
+                    const enc1 = chars.indexOf(str.charAt(i++));
+                    const enc2 = chars.indexOf(str.charAt(i++));
+                    const enc3 = chars.indexOf(str.charAt(i++));
+                    const enc4 = chars.indexOf(str.charAt(i++));
+
+                    const chr1 = (enc1 << 2) | (enc2 >> 4);
+                    const chr2 = ((enc2 & 15) << 4) | (enc3 >> 2);
+                    const chr3 = ((enc3 & 3) << 6) | enc4;
+
+                    output += String.fromCharCode(chr1);
+                    if (enc3 !== 64 && enc3 !== -1) output += String.fromCharCode(chr2);
+                    if (enc4 !== 64 && enc4 !== -1) output += String.fromCharCode(chr3);
+                  }
+                  textChunk = output;
+                }
                 this.handleIncomingChunk(textChunk);
               }
             }
@@ -425,9 +469,16 @@ export class BluetoothService {
     return this.transportType;
   }
 
+  private isWriting: boolean = false;
+
   public async sendData(data: string): Promise<boolean> {
     if (!this.isConnected()) {
       console.log('[BluetoothService] Bluetooth is not connected. Data packet not sent.');
+      return false;
+    }
+
+    if (this.isWriting) {
+      console.warn('[BluetoothService] Write in progress. Dropping packet to prevent Native Bridge deadlock.');
       return false;
     }
 
@@ -436,40 +487,68 @@ export class BluetoothService {
 
     // 1. Write bytes to native react-native-ble-plx characteristic if connected on mobile
     if (this.nativeDevice) {
-      try {
-        const base64Data = typeof Buffer !== 'undefined'
-          ? Buffer.from(payload).toString('base64')
-          : btoa(payload);
+      const targetServiceUuid = this.activeBleServiceUuid || BLE_SERVICE_UUID;
+      const targetRxUuid = this.activeBleRxUuid || BLE_RX_UUID;
 
-        const targetServiceUuid = this.activeBleServiceUuid || BLE_SERVICE_UUID;
-        const targetRxUuid = this.activeBleRxUuid || BLE_RX_UUID;
+      this.isWriting = true;
 
-        await this.nativeDevice.writeCharacteristicWithResponseForService(
-          targetServiceUuid,
-          targetRxUuid,
-          base64Data
-        );
-        console.log(`[BluetoothService] Native BLE transmission successful to ${this.connectedDeviceId} (Service: ${targetServiceUuid}, RX: ${targetRxUuid})`);
-        return true;
-      } catch (err: any) {
-        console.warn('[BluetoothService] Native BLE write error, trying without response:', err?.message);
+      // Robust Base64 Encoder for React Native BLE payload
+      const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=';
+      let base64Data = '';
+      let i = 0;
+      while (i < payload.length) {
+        const c1 = payload.charCodeAt(i++);
+        const c2 = i < payload.length ? payload.charCodeAt(i++) : NaN;
+        const c3 = i < payload.length ? payload.charCodeAt(i++) : NaN;
+        
+        const e1 = c1 >> 2;
+        const e2 = ((c1 & 3) << 4) | (isNaN(c2) ? 0 : c2 >> 4);
+        const e3 = isNaN(c2) ? 64 : ((c2 & 15) << 2) | (isNaN(c3) ? 0 : c3 >> 6);
+        const e4 = isNaN(c3) ? 64 : c3 & 63;
+        
+        base64Data += chars.charAt(e1) + chars.charAt(e2) + chars.charAt(e3) + chars.charAt(e4);
+      }
+
+      const performWrite = async () => {
         try {
-          const base64Data = typeof Buffer !== 'undefined'
-            ? Buffer.from(payload).toString('base64')
-            : btoa(payload);
-
-          const targetServiceUuid = this.activeBleServiceUuid || BLE_SERVICE_UUID;
-          const targetRxUuid = this.activeBleRxUuid || BLE_RX_UUID;
-
-          await this.nativeDevice.writeCharacteristicWithoutResponseForService(
+          // Primary: WithResponse triggers GATT Long Write, guaranteeing atomic delivery
+          // even if the Android MTU negotiation failed!
+          await this.nativeDevice!.writeCharacteristicWithResponseForService(
             targetServiceUuid,
             targetRxUuid,
             base64Data
           );
           return true;
-        } catch (err2: any) {
-          console.error('[BluetoothService] Native BLE write failed:', err2?.message);
+        } catch (err: any) {
+          try {
+            // Fallback: WithoutResponse (will work perfectly if MTU was successfully negotiated to 512)
+            await this.nativeDevice!.writeCharacteristicWithoutResponseForService(
+              targetServiceUuid,
+              targetRxUuid,
+              base64Data
+            );
+            return true;
+          } catch (err2: any) {
+            console.error('[BluetoothService] Native BLE write failed completely:', err2?.message);
+            return false;
+          }
         }
+      };
+
+      try {
+        const timeoutPromise = new Promise<boolean>((resolve) => setTimeout(() => resolve(false), 1500));
+        const success = await Promise.race([performWrite(), timeoutPromise]);
+        if (!success) {
+          console.warn('[BluetoothService] Native BLE transmission timed out.');
+        } else {
+          console.log(`[BluetoothService] Native BLE transmission successful to ${this.connectedDeviceId}`);
+        }
+        this.isWriting = false;
+        return success;
+      } catch (err) {
+        console.warn('[BluetoothService] Write exception:', err);
+        this.isWriting = false;
+        return false;
       }
     }
 
@@ -532,16 +611,18 @@ export class BluetoothService {
       this.emitRawPacket(bufTrimmed);
       this.rxBuffer = '';
     } else if (this.rxBuffer.length > 0) {
-      // Set ultra-fast 30ms auto-flush timer for stream fragments to prevent delays
+      // Set safe 400ms auto-flush timer for stream fragments to prevent delays
+      // This MUST be long enough to allow all 20-byte BLE chunks of a long message to arrive
+      // before we force-emit the packet. 30ms was too fast and was cutting coordinates in half!
       this.rxTimer = setTimeout(() => {
         const remaining = this.rxBuffer.trim();
         if (remaining.length > 0) {
-          console.log('[BluetoothService] Buffer auto-flushed after 30ms idle timeout:', remaining);
+          console.log('[BluetoothService] Buffer auto-flushed after 400ms idle timeout:', remaining);
           this.emitRawPacket(remaining);
         }
         this.rxBuffer = '';
         this.rxTimer = null;
-      }, 30);
+      }, 400);
     }
   }
 

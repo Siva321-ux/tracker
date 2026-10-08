@@ -44,12 +44,11 @@ export default function ChatScreen() {
 
   const devices = useDeviceStore((s) => Object.values(s.devices));
   
-  // Filter out connected self node, auth user name, and generic 'User' placeholder entries
+  // Filter out the local self node to list only genuine peers for private chat
   const peerDevices = devices.filter((d) => {
+    if (d.isSelf || d.deviceId === 'self' || d.deviceId === connectedNodeName) return false;
     const name = d.userName || d.deviceName || d.deviceId;
-    if (!name || name === 'User' || name === 'ESP32 Gateway' || name === 'Mobile Node') return false;
-    const isSelfId = d.deviceId === connectedNodeName || d.userName === connectedNodeName || d.deviceName === connectedNodeName;
-    return !isSelfId;
+    return !!name;
   });
 
   const [chatTab, setChatTab] = useState<'public' | 'private'>('public');
@@ -202,9 +201,28 @@ export default function ChatScreen() {
 
       const encodeBase64 = (str: string): string => {
         try {
-          return typeof Buffer !== 'undefined'
-            ? Buffer.from(str, 'utf-8').toString('base64')
-            : btoa(unescape(encodeURIComponent(str)));
+          if (typeof Buffer !== 'undefined') {
+            return Buffer.from(str, 'utf-8').toString('base64');
+          } else {
+            // Standard Base64 Encoder
+            const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=';
+            let b64 = '';
+            let i = 0;
+            const utf8Str = unescape(encodeURIComponent(str));
+            while (i < utf8Str.length) {
+              const c1 = utf8Str.charCodeAt(i++);
+              const c2 = i < utf8Str.length ? utf8Str.charCodeAt(i++) : NaN;
+              const c3 = i < utf8Str.length ? utf8Str.charCodeAt(i++) : NaN;
+              
+              const e1 = c1 >> 2;
+              const e2 = ((c1 & 3) << 4) | (isNaN(c2) ? 0 : c2 >> 4);
+              const e3 = isNaN(c2) ? 64 : ((c2 & 15) << 2) | (isNaN(c3) ? 0 : c3 >> 6);
+              const e4 = isNaN(c3) ? 64 : c3 & 63;
+              
+              b64 += chars.charAt(e1) + chars.charAt(e2) + chars.charAt(e3) + chars.charAt(e4);
+            }
+            return b64;
+          }
         } catch (_) {
           return str;
         }
@@ -215,7 +233,7 @@ export default function ChatScreen() {
         setPublicMessages((prev) => [...prev, newMsg]);
         // 2. Instant Bluetooth Radio Packet Dispatch (Base64 encoded for Web & LoRa mesh compatibility)
         const rawPublicPacket = `MSG,COMMON,${selfName},ALL,${encodeBase64(newMsg.message)}`;
-        BluetoothService.getInstance().sendData(rawPublicPacket);
+        BluetoothService.getInstance().sendData(rawPublicPacket).catch(err => console.warn('[Chat] Public send error:', err));
         // 3. Background SQLite Storage
         savePublicMessageLocally(1, currentUser?.id || 1, selfName, newMsg.message, clientMsgId, isOnline).catch(console.warn);
       } else {
@@ -236,7 +254,7 @@ export default function ChatScreen() {
 
         // 2. Instant Bluetooth Radio Packet Dispatch (Base64 encoded for Web & LoRa mesh compatibility)
         const rawChatPacket = `MSG,PRIVATE,${selfName},${targetRecipient},${encodeBase64(newMsg.message)}`;
-        BluetoothService.getInstance().sendData(rawChatPacket);
+        BluetoothService.getInstance().sendData(rawChatPacket).catch(err => console.warn('[Chat] Private send error:', err));
 
         // 3. Background SQLite Storage
         savePrivateMessageLocally(currentUser?.id || 1, 2, selfName, newMsg.message, clientMsgId, isOnline).catch(console.warn);

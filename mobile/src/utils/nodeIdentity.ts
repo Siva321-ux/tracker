@@ -1,5 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useAuthStore } from '../store/authStore';
+import { useDeviceStore } from '../store/deviceStore';
 
 let cachedNodeId: string | null = null;
 
@@ -8,16 +9,17 @@ let cachedNodeId: string | null = null;
  * Priority:
  * 1. Logged in / configured User Name from authStore (e.g. 'THANU' or 'JESS')
  * 2. Persisted unique hardware ID (e.g. 'NODE_7A2F')
- * 3. Newly generated unique hardware ID
+ * 3. Default 'Mobile Node'
  */
 export async function getLocalNodeIdAsync(): Promise<string> {
   const authUser = useAuthStore.getState().user;
-  if (authUser?.name && authUser.name !== 'User' && authUser.name !== 'ESP32 Gateway' && authUser.name !== 'Mobile Node') {
+  if (authUser?.name && authUser.name !== 'User' && authUser.name !== 'ESP32 Gateway') {
     cachedNodeId = authUser.name.trim();
+    useDeviceStore.getState().setLocalNodeName(cachedNodeId);
     return cachedNodeId;
   }
 
-  if (cachedNodeId && cachedNodeId !== 'User' && cachedNodeId !== 'Mobile Node') {
+  if (cachedNodeId && cachedNodeId !== 'User') {
     return cachedNodeId;
   }
 
@@ -25,36 +27,30 @@ export async function getLocalNodeIdAsync(): Promise<string> {
     const stored = await AsyncStorage.getItem('lora_local_node_id');
     if (stored && stored.trim().length > 0) {
       cachedNodeId = stored.trim();
+      useDeviceStore.getState().setLocalNodeName(cachedNodeId);
       return cachedNodeId;
     }
   } catch (_) {}
 
-  // Generate a distinct 4-hex callsign: NODE_A1B2
-  const randHex = Math.floor(Math.random() * 0xffff).toString(16).toUpperCase().padStart(4, '0');
-  const generatedId = `NODE_${randHex}`;
-  cachedNodeId = generatedId;
-
-  try {
-    await AsyncStorage.setItem('lora_local_node_id', generatedId);
-  } catch (_) {}
-
-  return generatedId;
+  cachedNodeId = 'Mobile Node';
+  useDeviceStore.getState().setLocalNodeName('Mobile Node');
+  return 'Mobile Node';
 }
 
 export function getLocalNodeIdSync(): string {
   const authUser = useAuthStore.getState().user;
-  if (authUser?.name && authUser.name !== 'User' && authUser.name !== 'ESP32 Gateway' && authUser.name !== 'Mobile Node') {
+  if (authUser?.name && authUser.name !== 'User' && authUser.name !== 'ESP32 Gateway') {
     return authUser.name.trim();
   }
   if (cachedNodeId) return cachedNodeId;
-  return 'NODE_1';
+  return 'Mobile Node';
 }
 
 export async function setLocalCallSign(name: string): Promise<void> {
-  const trimmed = name.trim();
-  if (!trimmed) return;
+  const trimmed = name.trim() || 'Mobile Node';
   cachedNodeId = trimmed;
   useAuthStore.getState().updateUserName(trimmed);
+  useDeviceStore.getState().setLocalNodeName(trimmed);
   try {
     await AsyncStorage.setItem('lora_local_node_id', trimmed);
   } catch (_) {}
