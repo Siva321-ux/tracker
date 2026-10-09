@@ -202,5 +202,19 @@ export const useDeviceStore = create<DeviceStoreState>((set) => ({
       return { devices: nextDevices };
     }),
   selectDevice: (deviceId) => set({ selectedDeviceId: deviceId }),
-  clearDevices: () => set({ devices: {}, selectedDeviceId: null })
+  clearDevices: () => set({
+    devices: {
+      self: {
+        deviceId: 'self',
+        deviceName: 'Mobile Node',
+        latitude: 11.5034,
+        longitude: 77.2444,
+        lastUpdated: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        status: 'online',
+        batteryOrValue: 100,
+        isSelf: true
+      }
+    },
+    selectedDeviceId: null
+  })
 }));
