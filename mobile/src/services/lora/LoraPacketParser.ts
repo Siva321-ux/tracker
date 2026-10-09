@@ -165,45 +165,58 @@ export class LoraPacketParser {
   private static safeBase64Decode(str: string): string {
     if (!str) return str;
     const trimmed = str.trim();
+    
+    const base64Regex = /^[A-Za-z0-9+/=]+$/;
+    if (!base64Regex.test(trimmed) || trimmed.length % 4 !== 0) {
+      return trimmed;
+    }
+
     try {
-      const base64Regex = /^[A-Za-z0-9+/=]+$/;
-      if (base64Regex.test(trimmed) && trimmed.length % 4 === 0) {
-        let decoded = '';
-        
-        // Exclusively use standard math decoder. React Native global Buffer is notoriously broken.
-        const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=';
-        // DO NOT strip padding '=' characters because we need them for accurate decoding!
-        const b64 = trimmed.replace(/[^A-Za-z0-9+/=]/g, '');
-        let i = 0;
-        let rawBytes = '';
-        while (i < b64.length) {
-            const enc1 = chars.indexOf(b64.charAt(i++));
-            const enc2 = chars.indexOf(b64.charAt(i++));
-            const enc3 = chars.indexOf(b64.charAt(i++));
-            const enc4 = chars.indexOf(b64.charAt(i++));
+      // Robust Base64 to Math Decoder
+      const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=';
+      const b64 = trimmed.replace(/[^A-Za-z0-9+/=]/g, '');
+      let i = 0;
+      const bytes = [];
 
-            const chr1 = (enc1 << 2) | (enc2 >> 4);
-            const chr2 = ((enc2 & 15) << 4) | (enc3 >> 2);
-            const chr3 = ((enc3 & 3) << 6) | enc4;
+      while (i < b64.length) {
+        const enc1 = chars.indexOf(b64.charAt(i++));
+        const enc2 = chars.indexOf(b64.charAt(i++));
+        const enc3 = chars.indexOf(b64.charAt(i++));
+        const enc4 = chars.indexOf(b64.charAt(i++));
 
-            rawBytes += String.fromCharCode(chr1);
-            if (enc3 !== 64 && enc3 !== -1) rawBytes += String.fromCharCode(chr2);
-            if (enc4 !== 64 && enc4 !== -1) rawBytes += String.fromCharCode(chr3);
-          }
-          
-          try {
-            // Reconstruct UTF-16 Javascript string from raw UTF-8 bytes (Fixes emojis)
-            decoded = decodeURIComponent(escape(rawBytes));
-          } catch (e) {
-            decoded = rawBytes;
-          }
-        
-        // Remove the regex check that restricts output to ASCII, allowing emojis to pass
-        if (decoded && decoded.trim().length > 0) {
-          return decoded;
+        const chr1 = (enc1 << 2) | (enc2 >> 4);
+        const chr2 = ((enc2 & 15) << 4) | (enc3 >> 2);
+        const chr3 = ((enc3 & 3) << 6) | enc4;
+
+        bytes.push(chr1);
+        if (enc3 !== 64 && enc3 !== -1) bytes.push(chr2);
+        if (enc4 !== 64 && enc4 !== -1) bytes.push(chr3);
+      }
+
+      // Robust UTF-8 byte array to JS String decoder (Replaces deprecated escape/decodeURIComponent)
+      let out = '';
+      let j = 0;
+      while (j < bytes.length) {
+        let c = bytes[j++];
+        if (c < 128) {
+          out += String.fromCharCode(c);
+        } else if (c > 191 && c < 224) {
+          let c2 = bytes[j++];
+          out += String.fromCharCode(((c & 31) << 6) | (c2 & 63));
+        } else {
+          let c2 = bytes[j++];
+          let c3 = bytes[j++];
+          out += String.fromCharCode(((c & 15) << 12) | ((c2 & 63) << 6) | (c3 & 63));
         }
       }
-    } catch (_) {}
+
+      if (out && out.trim().length > 0) {
+        return out;
+      }
+    } catch (e) {
+      console.warn('[LoraPacketParser] Base64 mathematical decode failed:', e);
+    }
+    
     return trimmed;
   }
 

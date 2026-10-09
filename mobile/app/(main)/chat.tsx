@@ -203,29 +203,40 @@ export default function ChatScreen() {
 
       const encodeBase64 = (str: string): string => {
         try {
-          if (typeof Buffer !== 'undefined') {
-            return Buffer.from(str, 'utf-8').toString('base64');
-          } else {
-            // Standard Base64 Encoder
-            const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=';
-            let b64 = '';
-            let i = 0;
-            const utf8Str = unescape(encodeURIComponent(str));
-            while (i < utf8Str.length) {
-              const c1 = utf8Str.charCodeAt(i++);
-              const c2 = i < utf8Str.length ? utf8Str.charCodeAt(i++) : NaN;
-              const c3 = i < utf8Str.length ? utf8Str.charCodeAt(i++) : NaN;
-              
-              const e1 = c1 >> 2;
-              const e2 = ((c1 & 3) << 4) | (isNaN(c2) ? 0 : c2 >> 4);
-              const e3 = isNaN(c2) ? 64 : ((c2 & 15) << 2) | (isNaN(c3) ? 0 : c3 >> 6);
-              const e4 = isNaN(c3) ? 64 : c3 & 63;
-              
-              b64 += chars.charAt(e1) + chars.charAt(e2) + chars.charAt(e3) + chars.charAt(e4);
+          // Robust JS String to UTF-8 Byte Array
+          const bytes = [];
+          for (let i = 0; i < str.length; i++) {
+            let c = str.charCodeAt(i);
+            if (c < 128) {
+              bytes.push(c);
+            } else if (c < 2048) {
+              bytes.push((c >> 6) | 192);
+              bytes.push((c & 63) | 128);
+            } else {
+              bytes.push((c >> 12) | 224);
+              bytes.push(((c >> 6) & 63) | 128);
+              bytes.push((c & 63) | 128);
             }
-            return b64;
           }
-        } catch (_) {
+
+          // Robust Math Base64 Encoder
+          const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=';
+          let b64 = '';
+          for (let i = 0; i < bytes.length; i += 3) {
+            const c1 = bytes[i];
+            const c2 = i + 1 < bytes.length ? bytes[i + 1] : NaN;
+            const c3 = i + 2 < bytes.length ? bytes[i + 2] : NaN;
+
+            const e1 = c1 >> 2;
+            const e2 = ((c1 & 3) << 4) | (isNaN(c2) ? 0 : c2 >> 4);
+            const e3 = isNaN(c2) ? 64 : ((c2 & 15) << 2) | (isNaN(c3) ? 0 : c3 >> 6);
+            const e4 = isNaN(c3) ? 64 : c3 & 63;
+
+            b64 += chars.charAt(e1) + chars.charAt(e2) + chars.charAt(e3) + chars.charAt(e4);
+          }
+          return b64;
+        } catch (e) {
+          console.warn('[Chat] Math base64 encode failed:', e);
           return str;
         }
       };
