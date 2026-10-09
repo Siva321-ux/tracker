@@ -407,7 +407,7 @@ export class BluetoothService {
       console.log(`[BluetoothService] Disconnecting from ${this.connectedDeviceId}...`);
       if (this.nativeDevice && this.nativeDevice.cancelConnection) {
         try {
-          this.nativeDevice.cancelConnection();
+          await this.nativeDevice.cancelConnection();
         } catch (e) { }
       }
       if (this.webGattServer && this.webGattServer.disconnect) {
