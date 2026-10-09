@@ -231,11 +231,12 @@ export class BluetoothService {
 
           try {
             // Request MTU *after* service discovery to safely enable large payloads
-            // and completely avoid the manual chunking problem (ESP32 lacks packet assembly).
-            await device.requestMTU(512);
+            // Use a strict timeout because many ESP32 firmwares hang indefinitely on MTU requests.
+            const mtuTimeout = new Promise((_, reject) => setTimeout(() => reject(new Error('MTU Timeout')), 750));
+            await Promise.race([device.requestMTU(512), mtuTimeout]);
             console.log('[BluetoothService] MTU successfully negotiated to 512 bytes');
           } catch (mtuErr: any) {
-            console.warn('[BluetoothService] MTU negotiation failed, device may be limited to 20 bytes:', mtuErr?.message);
+            console.warn('[BluetoothService] MTU negotiation failed/timed out, device may be limited to 20 bytes:', mtuErr?.message);
           }
 
           this.nativeDevice = device;

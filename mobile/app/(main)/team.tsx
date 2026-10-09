@@ -11,6 +11,7 @@ import { BluetoothService } from '../../src/services/bluetooth/BluetoothService'
 import { BluetoothConnectModal } from '../../src/components/BluetoothConnectModal';
 import { useAuthStore } from '../../src/store/authStore';
 import { getLocalNodeIdSync } from '../../src/utils/nodeIdentity';
+import { LocationTrackerService } from '../../src/services/location/LocationTrackerService';
 
 export default function TeamScreen() {
   const insets = useSafeAreaInsets();
@@ -46,6 +47,9 @@ export default function TeamScreen() {
               onPress={async () => {
                 await BluetoothService.getInstance().disconnect();
                 useNetworkStore.getState().setLoraStatus(false);
+                useDeviceStore.getState().clearDevices();
+                useAuthStore.getState().logout();
+                LocationTrackerService.getInstance().stopTracking();
                 Alert.alert('Disconnected', 'Bluetooth gateway connection closed. Radio returned to Mobile Node.');
               }}
             >
