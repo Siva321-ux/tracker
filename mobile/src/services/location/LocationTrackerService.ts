@@ -50,9 +50,14 @@ export class LocationTrackerService {
     // Start native location position stream if available
     try {
       if (Location && Location.watchPositionAsync) {
+        // Safely extract accuracy enum or fallback to a hardcoded integer (e.g. 6 = Highest, 3 = Balanced)
+        const accuracyLevel = (Location.Accuracy && typeof Location.Accuracy.High !== 'undefined') 
+          ? Location.Accuracy.High 
+          : 6;
+
         this.locationSubscription = await Location.watchPositionAsync(
           {
-            accuracy: Location.Accuracy.High,
+            accuracy: accuracyLevel as any,
             timeInterval: 4000,
             distanceInterval: 2
           },

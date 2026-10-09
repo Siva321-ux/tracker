@@ -169,15 +169,14 @@ export class LoraPacketParser {
       const base64Regex = /^[A-Za-z0-9+/=]+$/;
       if (base64Regex.test(trimmed) && trimmed.length % 4 === 0) {
         let decoded = '';
-        if (typeof Buffer !== 'undefined') {
-          decoded = Buffer.from(trimmed, 'base64').toString('utf-8');
-        } else {
-          // Standard Base64 Decoder
-          const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=';
-          const b64 = trimmed.replace(/[^A-Za-z0-9+/]/g, '');
-          let i = 0;
-          let rawBytes = '';
-          while (i < b64.length) {
+        
+        // Exclusively use standard math decoder. React Native global Buffer is notoriously broken.
+        const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=';
+        // DO NOT strip padding '=' characters because we need them for accurate decoding!
+        const b64 = trimmed.replace(/[^A-Za-z0-9+/=]/g, '');
+        let i = 0;
+        let rawBytes = '';
+        while (i < b64.length) {
             const enc1 = chars.indexOf(b64.charAt(i++));
             const enc2 = chars.indexOf(b64.charAt(i++));
             const enc3 = chars.indexOf(b64.charAt(i++));
@@ -198,7 +197,6 @@ export class LoraPacketParser {
           } catch (e) {
             decoded = rawBytes;
           }
-        }
         
         // Remove the regex check that restricts output to ASCII, allowing emojis to pass
         if (decoded && decoded.trim().length > 0) {
